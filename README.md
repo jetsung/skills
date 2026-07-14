@@ -23,7 +23,7 @@
 > 生成符合 [Conventional Commits](https://www.conventionalcommits.org/) 规范的 git 提交信息，描述部分使用简体中文。
 
 - **触发场景**：提交代码、生成 commit message
-- **路径**：`git-commit/`
+- **路径**：`skills/git-commit/`
 
 **特性：**
 
@@ -49,20 +49,20 @@ feat(utils): 添加常用工具函数
 > 自动检测并更新 GitHub Actions 工作流文件中使用的 Action 版本至最新主版本。
 
 - **触发场景**：需要升级 workflow 中的 action 版本
-- **路径**：`update-gh-action-version/`
+- **路径**：`skills/update-gh-action-version/`
 - **依赖**：`curl`、`sed`、GitHub API 访问
 
 **用法：**
 
 ```bash
 # 更新 .github/workflows 下所有 Action 版本
-scripts/update_action.sh
+skills/update-gh-action-version/scripts/update_action.sh
 
 # 更新指定目录下的所有 Action 版本
-scripts/update_action.sh .test/test/
+skills/update-gh-action-version/scripts/update_action.sh .test/test/
 
 # 仅更新指定 Action（如 actions/checkout）的版本
-scripts/update_action.sh .test/test/ actions/checkout
+skills/update-gh-action-version/scripts/update_action.sh .test/test/ actions/checkout
 ```
 
 **工作原理：**
@@ -84,10 +84,10 @@ git clone https://github.com/jetsung/skills.git
 
 ## 添加新 Skill
 
-在项目根目录下创建新的 skill 文件夹，至少包含一个 `SKILL.md` 文件：
+在 `skills/` 目录下创建新的 skill 文件夹，至少包含一个 `SKILL.md` 文件：
 
 ```
-skill-name/
+skills/skill-name/
 ├── SKILL.md          # 必须：描述 name、description、使用方法
 └── scripts/          # 可选：辅助脚本
 ```
