@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #
-# apply.sh — 把翻译产出的完整译文覆盖回译文目录
+# apply.sh — 把翻译产出的完整译文覆盖回译文目录，并清理被删除文档的对应译文
 #
 # 前置：prepare.sh 生成 <WORK_DIR>/<rel>.input.md；翻译环节产出
 #       <WORK_DIR>/<rel>.zh.md（完整新译文）。
-# 本脚本把每个 .zh.md 覆盖回 <ZH_DIR>/<rel>，并在覆盖前做基本校验：
-#   - .zh.md 必须存在且非空；
-#   - 必须保留 YAML frontmatter（以 --- 开头）或与原译文结构一致。
+# 本脚本：
+#   - 把每个 .zh.md 覆盖回 <ZH_DIR>/<rel>，并在覆盖前做基本校验：
+#     - .zh.md 必须存在且非空；
+#     - 必须保留 YAML frontmatter（以 --- 开头）或与原译文结构一致。
+#   - 读取 <WORK_DIR>/deleted.txt（prepare.sh 生成，源目录被删除的英文文档清单），
+#     删除 <ZH_DIR>/<rel> 中对应的中文译文。
 #
 # 通用性：通过 PROJECT_ROOT / DOCS_DIR / ZH_DIR / WORK_DIR 适配任意项目。
 #
@@ -67,4 +70,31 @@ done < "$INDEX"
 
 echo ""
 echo "🎉 回填完成：$ok 个文件已更新，$skip 个跳过。"
+
+# 清理被删除英文文档对应的中文译文
+DELETED_FILE="$WORK_DIR/deleted.txt"
+del_ok=0
+if [[ -f "$DELETED_FILE" ]]; then
+    while IFS= read -r rel; do
+        [[ -n "$rel" ]] || continue
+        dst="$ZH_DIR/$rel"
+        if [[ -e "$dst" ]]; then
+            rm -rf "$dst"
+            echo "🗑️  已删除译文 $rel（对应英文文档已在上游移除）"
+            del_ok=$((del_ok+1))
+        else
+            echo "   （跳过 $rel：译文不存在）"
+        fi
+    done < "$DELETED_FILE"
+fi
+
+echo ""
+if [[ $del_ok -gt 0 ]]; then
+    echo "🗑️  清理完成：$del_ok 个被删除文档的译文已移除。"
+fi
+
+# 回填后再次清理，确保 ZH_DIR 中没有非文档文件
+find "$ZH_DIR" -type f ! \( -name "*.md" -o -name "*.mdx" \) -delete 2>/dev/null || true
+echo "🧹 已清理 $ZH_DIR 中的非文档文件"
+
 echo "    请运行 git diff $ZH_DIR/ 检查译文，确认无误后提交。"

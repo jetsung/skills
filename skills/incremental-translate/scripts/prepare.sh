@@ -2,15 +2,19 @@
 #
 # prepare.sh — 增量翻译准备：为源文档目录中每个改动文件生成「翻译输入包」
 #
-# 痛点：aitr 以整个文件为单位翻译，文件有一处修改就重翻整篇（changelog.md
+# 痛点：整篇翻译以整个文件为单位，文件有一处修改就重翻整篇（changelog.md
 # 达 100KB+，浪费大量 token）。本 skill 改为「增量」：
-#   1. 以 git 基线（默认 HEAD）对比当前工作区源文档目录，找出改动文件；
-#   2. 为每个改动文件生成 <WORK_DIR>/<rel>.input.md，内含：
+#   1. 以 git 基线（默认 HEAD）对比当前工作区源文档目录：
+#        - 找出新增/修改的文件（diff-filter=AM），为其生成翻译输入包；
+#        - 找出被删除的文件（diff-filter=D），写入 deleted.txt，
+#          供 apply.sh 删除译文目录中对应的中文文档；
+#   2. 为每个新增/修改文件生成 <WORK_DIR>/<rel>.input.md，内含：
 #        - 该文件的英文 diff（仅变更部分，作为翻译增量来源）
 #        - 该文件在译文目录的现有译文（作为上下文，避免重翻未改动部分）
 #   3. 翻译环节只需把「变更段」翻成目标语言，并就地替换到译文对应位置，
 #      产出完整的新译文文件 <WORK_DIR>/<rel>.zh.md；
-#   4. apply.sh 把 .zh.md 覆盖回 <ZH_DIR>/<rel>（零对齐风险）。
+#   4. apply.sh 把 .zh.md 覆盖回 <ZH_DIR>/<rel>，并删除 deleted.txt 中
+#      对应译文（零对齐风险）。
 #
 # 通用性：通过环境变量适配任意项目，无需修改脚本。
 #   - PROJECT_ROOT 项目根目录（默认：调用时所在目录，或脚本推导）
@@ -60,15 +64,42 @@ fi
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
+# 确保 ZH_DIR 中只有 .md/.mdx 文件（防止 CI 构建时因非文档文件导致失败）
+if [[ -d "$ZH_DIR" ]]; then
+    find "$ZH_DIR" -type f ! \( -name "*.md" -o -name "*.mdx" \) -delete 2>/dev/null || true
+    echo "🧹 已清理 $ZH_DIR 中的非文档文件"
+fi
 
 mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "$BASE_REF" -- "$DOCS_DIR" 2>/dev/null || true)
 
-if [[ ${#CHANGED[@]} -eq 0 ]]; then
+# 检测被删除的英文文档：源目录相对基线的删除项，供 apply.sh 清理对应译文
+DELETED_FILE="$WORK_DIR/deleted.txt"
+: > "$DELETED_FILE"
+mapfile -t DELETED < <(git diff --name-only --diff-filter=D "$BASE_REF" -- "$DOCS_DIR" 2>/dev/null || true)
+for f in "${DELETED[@]:-}"; do
+    rel="${f#"$DOCS_DIR"/}"
+    echo "$rel" >> "$DELETED_FILE"
+done
+
+if [[ ${#CHANGED[@]} -eq 0 && ${#DELETED[@]} -eq 0 ]]; then
     echo "✅ 没有检测到 $DOCS_DIR 相对 $BASE_REF 的改动。"
     exit 0
 fi
 
-echo "🔍 检测到 ${#CHANGED[@]} 个改动文件，生成翻译输入包..."
+if [[ ${#DELETED[@]} -gt 0 ]]; then
+    echo "🗑️  检测到 ${#DELETED[@]} 个被删除的英文文档（apply 时将清理对应译文）："
+    for f in "${DELETED[@]}"; do
+        echo "  • ${f#"$DOCS_DIR"/}"
+    done
+fi
+
+if [[ ${#CHANGED[@]} -eq 0 ]]; then
+    echo "✅ 没有需要翻译的新增/修改文件。"
+    echo "    被删除文档的译文将由 apply.sh 清理。"
+    exit 0
+fi
+
+echo "🔍 检测到 ${#CHANGED[@]} 个新增/修改文件，生成翻译输入包..."
 
 INDEX="$WORK_DIR/manifest.txt"
 : > "$INDEX"
@@ -111,4 +142,5 @@ echo ""
 echo "📝 翻译输入包已写入 $WORK_DIR/"
 echo "    翻译要求：阅读每个 *.input.md，把 diff 中的变更段翻译为目标语言，"
 echo "    输出完整的新译文到 $WORK_DIR/<rel>.zh.md（保留未改动部分原样）。"
+echo "    🗑️  被删除文档清单：$DELETED_FILE（apply.sh 将据此清理对应中文译文）"
 echo "    完成后运行：bash <skill>/scripts/apply.sh"
