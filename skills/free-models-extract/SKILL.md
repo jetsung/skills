@@ -1,9 +1,9 @@
 ---
 name: free-models-extract
 description: >-
-  从任意 AI 模型渠道（provider）提取真正可用的免费/零价模型清单，并可更新到多个 agent 工具（pi、omp、opencode 等）的配置文件。
+  从任意 AI 模型渠道（provider）提取真正可用的免费/零价模型清单，并可更新到多个 agent 工具（pi、omp、opencode、dsh 等）的配置文件。
   凡是用户提到"获取/提取/列出/查看 XX 渠道免费模型"、"从价格判断免费模型"、"查价格为零的模型"、
-  "有哪些免费模型可用"、"给 XX 渠道加免费模型"、"这个免费模型能用吗"、"把模型更新到 pi/omp/opencode"时，都应使用此技能。
+  "有哪些免费模型可用"、"给 XX 渠道加免费模型"、"这个免费模型能用吗"、"把模型更新到 pi/omp/opencode/dsh"时，都应使用此技能。
   技能通用性强：支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
   使用前需用户指定：①目标渠道，②筛选方式（按价格=0 / free 标签 / 关键词等）。技能会抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论并可写入多工具配置。
 ---
@@ -19,7 +19,7 @@ description: >-
 - "从价格中判断哪些是免费模型"
 - "XX 渠道有哪些免费模型可用"
 - "给 pi/omp 的 XX 渠道添加免费模型"
-- "把这个免费模型更新到 opencode / pi / omp"
+- "把这个免费模型更新到 opencode / pi / omp / dsh"
 - "这个免费模型能用吗 / 测试一下这个模型"
 
 ## 前置步骤：确认渠道、筛选方式与目标工具（必须）
@@ -52,25 +52,36 @@ description: >-
 - **pi**：`~/.pi/agent/models.json`
 - **omp**：`~/.omp/agent/models.yml`
 - **opencode**：`~/.config/opencode/opencode.json`
+- **dsh（DeepSeek Harness）**：`~/.dsh/settings.yaml`
 - 其他工具：让用户提供配置文件路径与结构
 
 > 默认查询/提取只需渠道+筛选方式，写入配置时才确认目标工具。
+> 注意：dsh 的渠道配置并不来自 pi 的 `models.json`，其结构与 pi 不同（见「第 1 步」和「dsh」章节），读取 baseUrl/apiKeyEnv 时应以 `~/.dsh/settings.yaml` 为准。
 
 ## 依赖
 
-- 目标渠道的 `baseUrl` 与 `apiKey`（从 pi 配置文件读取）
+- 目标渠道的 `baseUrl` 与 `apiKey`（通常从 pi 配置文件读取；若写入目标是 dsh，则从 `~/.dsh/settings.yaml` 读取）
 - `curl` 和 `python3`
 
 ## 工作流程
 
 ### 第 1 步：读取渠道配置
 
-从 `~/.pi/agent/models.json` 读取目标渠道的 `baseUrl` 和 `apiKey`。注意 `apiKey` 形如 `!echo -n "$ENV_VAR"`，需解析出环境变量名并取值。
+**pi 配置**：从 `~/.pi/agent/models.json` 读取目标渠道的 `baseUrl` 和 `apiKey`。注意 `apiKey` 形如 `!echo -n "$ENV_VAR"`，需解析出环境变量名并取值。
 
 ```bash
 # 示例：openrouter
 BASE_URL="https://openrouter.ai/api/v1"
 API_KEY="$OPENROUTER_API_KEY"
+```
+
+**dsh 配置**：若目标是 dsh，则从 `~/.dsh/settings.yaml` 读取，结构为 `llm-pi-ai.providers.{渠道}`，字段为 `displayName`、`apiKeyEnv`（环境变量名，非 `!echo` 形式）、`api`、`baseURL`、`models`：
+
+```bash
+# 示例：dsh 的 newapi
+BASE_URL=$(python3 -c "import yaml;print(yaml.safe_load(open('~/.dsh/settings.yaml'))['llm-pi-ai']['providers']['newapi']['baseURL'])")
+API_KEY_VAR=$(python3 -c "import yaml;print(yaml.safe_load(open('~/.dsh/settings.yaml'))['llm-pi-ai']['providers']['newapi']['apiKeyEnv'])")
+API_KEY="${!API_KEY_VAR}"  # 按环境变量名取值
 ```
 
 ### 第 2 步：调用 /models 接口抓取模型
@@ -207,6 +218,22 @@ done
 ```
 > opencode 的模型 key/name 通常复用渠道中的完整模型 id，具体以 opencode.json 现有 provider 的 models 结构为准（可能为 0 条，需参考同文件的 other provider 结构）。
 
+### dsh → `~/.dsh/settings.yaml`
+`llm-pi-ai.providers.{渠道}.models` 是 **YAML 列表**，元素为**仅含 `id`**（无 name），且整体结构为 `llm-pi-ai.providers.{渠道}`：
+```yaml
+llm-pi-ai:
+  providers:
+    {渠道}:
+      displayName: {渠道}
+      apiKeyEnv: {环境变量名}   # 如 NEWAPI_API_KEY
+      api: openai-completions
+      baseURL: {baseUrl}
+      models:
+        - id: stealth/ox-alpha
+        - id: another/free-model
+```
+> dsh 的 models 元素**只有 `id`**（不带 name），且 provider 用 `displayName`/`apiKeyEnv`/`baseURL`（注意大小写，`baseURL` 是 URL 全大写）。写入时**只更新 models 列表**，保留原 provider 的其它字段（displayName/apiKeyEnv/api/baseURL）不变，并遵循文件原有格式。
+
 ### 其他工具
 让用户提供配置文件路径与结构，遵循该工具现有格式。
 
@@ -221,5 +248,6 @@ done
 - 渠道若没有定价字段，要退化到 `free-tag`/`keyword` 并明确告知用户。
 - 不要跳过连通性测试，很多"免费"模型实际不可用。
 - 报告给用户的免费清单必须是**实测可用**的，不可用的一律列入剔除原因。
-- 写入多工具配置时，务必匹配各工具（pi/omp/opencode）不同的结构格式，并校验。
+- 写入多工具配置时，务必匹配各工具（pi/omp/opencode/dsh）不同的结构格式，并校验。
+- dsh 的 models 元素只含 `id`，且路径是 `llm-pi-ai.providers.{渠道}`，不要与 pi 的 `providers.{渠道}` 混淆。
 - 涉及写入配置时先让用户决定，不要擅自修改。
