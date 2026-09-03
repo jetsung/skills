@@ -32,10 +32,39 @@ fi
 
 echo "找到 ${#FILES[@]} 个文件"
 
+# 未设置 GITHUB_TOKEN 时提示，避免匿名访问触发 GitHub API 速率限制
+if [ -z "$GITHUB_TOKEN" ]; then
+    echo "提示: 未检测到 GITHUB_TOKEN 环境变量，GitHub API 匿名访问速率限制为 60 次/小时。"
+    echo "      建议设置 GITHUB_TOKEN 以避免触发速率限制。"
+fi
+
+# 获取指定 action 的最新 release tag
+# 使用 GITHUB_TOKEN 进行认证可将速率限制提升到 5000 次/小时
+fetch_latest_tag() {
+    local action="$1"
+    local url="https://api.github.com/repos/$action/releases/latest"
+    local curl_args=(-s -H "Accept: application/vnd.github+json")
+
+    if [ -n "$GITHUB_TOKEN" ]; then
+        curl_args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    fi
+
+    local response
+    response=$(curl "${curl_args[@]}" "$url")
+
+    # 检测速率限制错误并给出明确提示
+    if echo "$response" | grep -q '"message".*API rate limit'; then
+        echo "错误: GitHub API 速率限制已耗尽，请设置 GITHUB_TOKEN 环境变量后重试" >&2
+        return 1
+    fi
+
+    echo "$response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -1
+}
+
 # 如果指定了 action，只处理该 action；否则处理所有 action
 if [ -n "$ACTION_NAME" ]; then
     # 获取指定 action 的最新版本
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/$ACTION_NAME/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_TAG=$(fetch_latest_tag "$ACTION_NAME")
 
     if [ -z "$LATEST_TAG" ]; then
         echo "无法获取 $ACTION_NAME 的最新版本"
@@ -63,7 +92,7 @@ else
         grep -oE 'uses:[[:space:]]*[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+@[vV]?[0-9.]+' "$FILE" 2>/dev/null | \
             sed -E 's/uses:[[:space:]]*//; s/@.*//' | sort -u | while read -r action; do
             # 获取该 action 的最新版本
-            LATEST_TAG=$(curl -s "https://api.github.com/repos/$action/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+            LATEST_TAG=$(fetch_latest_tag "$action")
 
             if [ -n "$LATEST_TAG" ]; then
                 MAJOR_VERSION=${LATEST_TAG%%.*}

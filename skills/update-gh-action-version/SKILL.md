@@ -1,7 +1,7 @@
 ---
 name: update-gh-action-version
 description: 自动更新 GitHub Actions 工作流文件中使用的 Action 版本。使用场景：用户需要更新 GitHub Actions workflow 文件中的 action 版本，或者要求升级到最新版本。
-compatibility: Requires curl, sed, and access to the GitHub API
+compatibility: Requires curl, sed, and access to the GitHub API. Optionally set GITHUB_TOKEN to avoid rate limits
 allowed-tools: Bash(scripts/update_action.sh:*)
 ---
 
@@ -27,6 +27,20 @@ scripts/update_action.sh .test/test/
 # Update only actions/checkout in a specific directory
 scripts/update_action.sh .test/test/ actions/checkout
 ```
+
+## Rate Limits & GITHUB_TOKEN
+
+The script queries the GitHub API for each Action. Without authentication, GitHub allows only 60 requests per hour per IP, which can be quickly exhausted when updating many Actions.
+
+Set the `GITHUB_TOKEN` environment variable to raise the limit to 5000 requests per hour:
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+# 或使用 GitHub CLI 获取 token
+export GITHUB_TOKEN=$(gh auth token)
+```
+
+When `GITHUB_TOKEN` is set, the script sends it as a `Bearer` token in the `Authorization` header. If the rate limit is hit, the script exits with a clear error message.
 
 ## How it works
 
