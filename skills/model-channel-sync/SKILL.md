@@ -1,16 +1,17 @@
 ---
-name: free-models-extract
+name: model-channel-sync
 description: >-
-  从任意 AI 模型渠道（provider）提取真正可用的免费/零价模型清单，并可更新到多个 agent 工具（pi、omp、opencode、dsh 等）的配置文件。
-  凡是用户提到"获取/提取/列出/查看 XX 渠道免费模型"、"从价格判断免费模型"、"查价格为零的模型"、
-  "有哪些免费模型可用"、"给 XX 渠道加免费模型"、"这个免费模型能用吗"、"把模型更新到 pi/omp/opencode/dsh"时，都应使用此技能。
+  管理 AI 模型渠道（provider）配置：①提取真正可用的免费/零价模型；②以 pi 等平台配置为基准，同步/更新渠道、模型、APIKEY 到多个 agent 工具（zcode、dsh、pi、omp、opencode、codebuddy 等）的配置文件。
+  凡是用户提到"获取/提取/列出/查看 XX 渠道免费模型"、"从价格判断免费模型"、"查价格为零的模型"、"有哪些免费模型可用"、
+  "给 XX 渠道加免费模型"、"这个免费模型能用吗/测试一下"、"把模型更新到 pi/omp/opencode/dsh"、
+  "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"时，都应使用此技能。
   技能通用性强：支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
-  使用前需用户指定：①目标渠道，②筛选方式（按价格=0 / free 标签 / 关键词等）。技能会抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论并可写入多工具配置。
+  提取场景需用户指定：①目标渠道，②筛选方式（按价格=0 / free 标签 / 关键词等），流程为抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论；同步场景需指定源与目标工具，流程为匹配渠道 → 合并模型 → 更新密钥 → 写回校验。
 ---
 
-# 免费模型提取与多工具更新（通用）
+# 模型渠道配置管理（免费提取与多工具同步）
 
-本技能从**任意 AI 模型渠道**提取**真正可用**的免费/零价模型，并支持将结果更新到多个 agent 工具的配置文件。核心价值：很多模型看似免费（带 `free` 标签或定价为 0），但实际因地区限制、鉴权失败、上游故障而不可用。技能完成「抓取 → 筛选 → 实测 → 结论 → 可选写入多工具」的完整闭环。
+本技能管理**AI 模型渠道配置**：从任意渠道提取**真正可用**的免费/零价模型，并将渠道、模型、密钥同步到多个 agent 工具的配置文件。核心价值：很多模型看似免费（带 `free` 标签或定价为 0），但实际因地区限制、鉴权失败、上游故障而不可用。技能完成「抓取 → 筛选 → 实测 → 结论 → 可选写入/同步多工具」的完整闭环。
 
 ## 触发时机
 
@@ -21,6 +22,9 @@ description: >-
 - "给 pi/omp 的 XX 渠道添加免费模型"
 - "把这个免费模型更新到 opencode / pi / omp / dsh"
 - "这个免费模型能用吗 / 测试一下这个模型"
+- "以 pi 平台的配置为基准，更新 XX 平台的提供商及模型"
+- "同步渠道/模型/APIKEY 到 XX"
+- "更新 XX 的 APIKEY"
 
 ## 前置步骤：确认渠道、筛选方式与目标工具（必须）
 
@@ -53,10 +57,12 @@ description: >-
 - **omp**：`~/.omp/agent/models.yml`
 - **opencode**：`~/.config/opencode/opencode.json`
 - **dsh（DeepSeek Harness）**：`~/.dsh/settings.yaml`
+- **zcode（ZCode）**：`~/.zcode/v2/config.json`
+- **codebuddy（CodeBuddy）**：`~/.codebuddy/models.json`
 - 其他工具：让用户提供配置文件路径与结构
 
 > 默认查询/提取只需渠道+筛选方式，写入配置时才确认目标工具。
-> 注意：dsh 的渠道配置并不来自 pi 的 `models.json`，其结构与 pi 不同（见「第 1 步」和「dsh」章节），读取 baseUrl/apiKeyEnv 时应以 `~/.dsh/settings.yaml` 为准。
+> 注意：dsh 的渠道配置并不来自 pi 的 `models.json`，其结构与 pi 不同（见「第 1 步」和「dsh」章节），读取 baseUrl/apiKeyEnv 时应以 `~/.dsh/settings.yaml` 为准；zcode 同理，见「第 1 步」和「zcode」章节。
 
 ## 依赖
 
@@ -83,6 +89,23 @@ BASE_URL=$(python3 -c "import yaml;print(yaml.safe_load(open('~/.dsh/settings.ya
 API_KEY_VAR=$(python3 -c "import yaml;print(yaml.safe_load(open('~/.dsh/settings.yaml'))['llm-pi-ai']['providers']['newapi']['apiKeyEnv'])")
 API_KEY="${!API_KEY_VAR}"  # 按环境变量名取值
 ```
+
+**zcode 配置**：若目标是 zcode，则从 `~/.zcode/v2/config.json` 读取，结构为 `provider.{渠道}`，渠道 key 为 UUID（自定义渠道）或 `builtin:xxx`（内置渠道）。字段为 `name`、`kind`（`openai-compatible`/`anthropic`）、`options.apiKey`（**明文 key**，非 `!echo` 环境变量形式）、`options.baseURL`、`enabled`、`source`、`models`：
+
+```bash
+# 示例：zcode 的 OpenRouter（渠道 key 为 UUID）
+python3 -c "
+import json
+c = json.load(open('$HOME/.zcode/v2/config.json'))
+p = c['provider']['57441beb-ec54-4130-a936-589d9ea151ee']  # 渠道 key
+print('BASE_URL:', p['options']['baseURL'])
+print('API_KEY:', p['options']['apiKey'])
+print('KIND:', p['kind'])
+"
+```
+> 注意：zcode 的 `kind` 为 `anthropic` 的渠道通常不支持 `GET {baseURL}/models`（Anthropic 协议无此端点），此时直接从该渠道 `models` map 的 key 读取模型列表，并告知用户改用配置读取方式。
+
+**渠道匹配方法（pi → zcode）**：zcode 的渠道 key 是 UUID/`builtin:xxx`，与 pi 的渠道名不同，需按 `name` 字段匹配。匹配前先规范化（小写并去除非字母数字）再比较；规范化后仍不一致的用显式别名（如 pi 的 `cloudflare-workers-ai` 规范化后是 `cloudflareworkersai`，zcode 的 `CloudFlare AI` 规范化后是 `cloudflareai`，需手动映射）。pi 的 `apiKey` 形如 `!echo -n "$ENV_VAR"`，提取环境变量名时正则须含数字：`r'!echo -n "\$([A-Z0-9_]+)"'`（变量名可能是 `DS2API_API_KEY`、`V2EX_API_KEY` 这类含数字的形式）。
 
 ### 第 2 步：调用 /models 接口抓取模型
 
@@ -234,6 +257,83 @@ llm-pi-ai:
 ```
 > dsh 的 models 元素**只有 `id`**（不带 name），且 provider 用 `displayName`/`apiKeyEnv`/`baseURL`（注意大小写，`baseURL` 是 URL 全大写）。写入时**只更新 models 列表**，保留原 provider 的其它字段（displayName/apiKeyEnv/api/baseURL）不变，并遵循文件原有格式。
 
+### zcode → `~/.zcode/v2/config.json`
+`provider.{渠道}.models` 是**对象（map）**，key 为模型 id，value 为对象（可含 `name`、`limit.context`、`reasoning`、`zcode.modified/priority` 等）。渠道 key 为 UUID（自定义渠道）或 `builtin:xxx`（内置渠道），渠道级字段为 `name`/`kind`/`options.apiKey`/`options.baseURL`/`enabled`/`source`：
+```json
+"provider": {
+  "{渠道key}": {
+    "name": "OpenRouter",
+    "kind": "openai-compatible",
+    "options": {
+      "apiKey": "sk-or-v1-xxx",
+      "baseURL": "https://openrouter.ai/api/v1",
+      "apiKeyRequired": true
+    },
+    "enabled": false,
+    "source": "custom",
+    "models": {
+      "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "name": "NVIDIA Nemotron Ultra 550B (Free)",
+        "limit": { "context": 200000 },
+        "zcode": { "modified": true, "priority": 99 }
+      }
+    }
+  }
+}
+```
+> zcode 的 `options.apiKey` 是**明文 key**（不是 `!echo` 环境变量形式），读取时直接取值，注意勿将密钥写入日志/输出。写入时**只更新 `models` map**，保留原 provider 的其它字段（name/kind/options/enabled/source）不变；新增模型条目建议带 `name`、`limit.context`（参考同渠道其它条目，如 200000）与 `zcode: {modified: true, priority: N}`（N 取现有条目 max+1），与文件原有格式一致。
+
+#### zcode 全量同步（以 pi 为基准：provider + models + apiKey）
+
+用户要求"以 pi 的渠道/模型为基准更新 zcode"时，直接运行技能自带脚本（幂等可重复执行；只改目标字段；密钥不回显）：
+
+```bash
+python3 scripts/sync-pi-to-zcode.py
+```
+
+脚本位置：`scripts/sync-pi-to-zcode.py`（与本文档同目录，相对路径以技能目录为基准）。执行前按需修改脚本顶部 `PI_PATH`/`ZC_PATH`/`ALIAS` 三个变量。
+
+**脚本行为：**
+- 备份（`.bak-YYYYMMDD`）→ 匹配渠道（规范化+别名映射）→ 合并 models（保留 zcode 现有 + 补 pi 缺失，幂等）→ 更新 apiKey（env 解析，正则含数字）→ 写回（保键序/不转义中文）→ 断言校验（只允许 models 新增与 apiKey 变化）
+- **baseURL / kind（兼容模式）：不更新已有值**，仅当目标缺失/为空时从 pi 补入（kind 由 pi 的 `api` 字段映射：`openai-completions` → `openai-compatible`，`anthropic` → `anthropic`）
+- 输出即报告摘要：渠道名 / env 名 / 长度 / 变化状态，不含密钥内容
+
+**要点：**
+- 渠道名匹配用规范化+显式别名（如 `cloudflare-workers-ai` → `CloudFlare AI`），不能直接字符串比较
+- 明文 apiKey 绝不打印；多轮执行幂等，不会重复添加
+- 长脚本用 heredoc/独立脚本文件传给 python3，**不要用 bash 双引号 `-c "..."`**（会吞掉 `\$`/`\"` 转义导致正则失效）
+
+#### 多工具全量同步（pi 为基准：opencode / dsh / omp）
+
+与 zcode 同步同模式，按工具选脚本（均在 `scripts/` 下，幂等可重复执行，自动备份+断言校验）：
+
+| 脚本 | 目标配置 | models 格式 | apiKey 处理 |
+|------|----------|-------------|-------------|
+| `sync-pi-to-opencode.py` | `~/.config/opencode/opencode.json` | 对象 map（key=id，value 含 family=id 前缀或渠道名） | 保留 `{env:XXX}` 占位符 |
+| `sync-pi-to-dsh.py` | `~/.dsh/settings.yaml` | 列表仅 `id` | 保留 `apiKeyEnv` 变量名 |
+| `sync-pi-to-omp.py` | `~/.omp/agent/models.yml` | 列表 `{id, name}` | 保留 `!echo` 占位符（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖） |
+| `sync-pi-to-codebuddy.py` | `~/.codebuddy/models.json` | **顶层数组**，每渠道一个代表模型条目 | **写死实值**（从 pi 的 `!echo -n "$VAR"` 解析环境变量） |
+
+```bash
+python3 scripts/sync-pi-to-opencode.py
+python3 scripts/sync-pi-to-dsh.py
+python3 scripts/sync-pi-to-omp.py
+python3 scripts/sync-pi-to-codebuddy.py
+```
+
+**codebuddy 专属规则**：
+- 配置顶层为**数组**，每条目一个模型：`{id, name, vendor, url, apiKey, supportsToolCall, supportsImages, supportsReasoning, useCustomProtocol}`
+- `url`：openai 兼容模式，**补全为 `{baseUrl}/chat/completions`**（已含则跳过）；渠道匹配按 url host（如 pi 的 sense → `token.sensenova.cn`）
+- `apiKey`：**写死实值**（非占位符，codebuddy 不支持 env 引用）；每渠道仅取一个代表模型（`MODEL_INDEX`，默认 0 取第一个）
+- `name`：**渠道显示名 + 模型名**以区分渠道（如 `Sense DeepSeek V4 Flash`、`V2EX coder-ds4-0731`）；模型名已含渠道前缀（如 amd 的 `AMD DeepSeek V4 Flash`）时不重复拼接
+- pi 渠道无模型（如 openrouter/opencode 空列表）或 apiKey env 未设置时跳过；codebuddy 中非 pi 渠道的既有条目保留
+
+共同要点：
+- opencode/dsh/omp 三工具的 apiKey 均为环境变量引用（非明文），同步时保留目标现有引用，只合并 models（保留现有 + 补 pi 缺失）；**codebuddy 例外：apiKey 写死实值**
+- **baseURL / kind（兼容模式，opencode 为 npm、dsh/omp 为 api）：不更新已有值**，仅当目标缺失/为空时补入——zcode 补 pi 的明文 baseURL 与映射后的 kind；opencode 补 `{env:XXX_BASE_URL}` 占位符（由 apiKey 占位符推导）；dsh/omp 补 pi 的 baseURL 与 api
+- 匹配渠道：同名优先，规范化兜底（如 `cloudflare-workers-ai`）；opencode 无 v2ex 时正确跳过
+- 写回：JSON 用 `json.dump(indent=2, ensure_ascii=False)`，YAML 用 `yaml.safe_dump(sort_keys=False, allow_unicode=True, default_flow_style=False)`；校验断言只允许 models 新增、apiKey 更新与 baseURL/kind 空值补充
+
 ### 其他工具
 让用户提供配置文件路径与结构，遵循该工具现有格式。
 
@@ -248,6 +348,11 @@ llm-pi-ai:
 - 渠道若没有定价字段，要退化到 `free-tag`/`keyword` 并明确告知用户。
 - 不要跳过连通性测试，很多"免费"模型实际不可用。
 - 报告给用户的免费清单必须是**实测可用**的，不可用的一律列入剔除原因。
-- 写入多工具配置时，务必匹配各工具（pi/omp/opencode/dsh）不同的结构格式，并校验。
+- 写入多工具配置时，务必匹配各工具（pi/omp/opencode/dsh/zcode）不同的结构格式，并校验。
 - dsh 的 models 元素只含 `id`，且路径是 `llm-pi-ai.providers.{渠道}`，不要与 pi 的 `providers.{渠道}` 混淆。
+- zcode 的渠道 key 是 UUID（自定义）或 `builtin:xxx`（内置），`options.apiKey` 为明文，`models` 是对象 map（key=模型 id，value=含 name/limit/zcode 的对象），与 pi/omp/dsh 的数组结构不同；`kind: anthropic` 的渠道无 `/models` 端点，模型列表从配置读取。
+- codebuddy 配置顶层是数组、每渠道一个代表模型、url 需补全 `/chat/completions`、apiKey 写死实值；渠道匹配按 url host。
+- 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件。
+- 环境变量名正则须含数字（`[A-Z0-9_]+`）；bash 传参用 heredoc 避免 `\$`/`\"` 转义被吞；写回前备份、写回后对比备份断言只动了目标字段。
+- 写入明文密钥后报告**绝不回显密钥内容**，只报告长度/变化状态。
 - 涉及写入配置时先让用户决定，不要擅自修改。
