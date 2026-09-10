@@ -13,11 +13,17 @@
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显。
 """
 import json, re, os, shutil, datetime
+import fetch_free
 
 PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 ZC_PATH = os.path.expanduser('~/.zcode/v2/config.json')
 ALIAS = {'cloudflare-workers-ai': 'CloudFlare AI'}  # 规范化后不匹配的渠道手动映射
 KIND_MAP = {'openai-completions': 'openai-compatible', 'anthropic': 'anthropic'}
+# kilo/openrouter 渠道不走 pi models 基准，改从上游 API 提取免费模型（含价格 0，剔除图像/视频类）；
+# opencode 渠道不同步（上游价格数据不正确）
+UPSTREAM_FREE = ('kilo', 'openrouter')
+# 不同步的渠道（pi 中存在但明确排除，如 opencode 上游价格数据不正确）
+SKIP_CHANNELS = ('opencode',)
 
 
 def norm(s):
@@ -32,11 +38,23 @@ zname2key = {norm(p['name']): k for k, p in zc['provider'].items() if 'name' in 
 
 out = []
 for pname, pdata in pi['providers'].items():
+    if pname in SKIP_CHANNELS:
+        out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
+        continue
     key = zname2key.get(norm(ALIAS.get(pname, pname)))
     if key is None:
         out.append(f'跳过 {pname}: zcode 无对应 provider')
         continue
     prov = zc['provider'][key]
+    # 模型源：kilo/opencode/openrouter 从上游提取免费模型，其他渠道用 pi models
+    if pname in UPSTREAM_FREE:
+        try:
+            items = fetch_free.fetch_free_models(pname)
+        except Exception as e:
+            items = pdata.get('models', [])
+            out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
+    else:
+        items = pdata.get('models', [])
     # 空值补充：仅当目标缺失/为空时从 pi 补入 baseURL / kind
     opts = prov.setdefault('options', {})
     if not opts.get('baseURL'):
@@ -51,7 +69,7 @@ for pname, pdata in pi['providers'].items():
              if isinstance(m, dict)]
     nxt = (max(prios) if prios else 99) + 1
     added = []
-    for item in pdata.get('models', []):
+    for item in items:
         if item['id'] not in existing:
             prov['models'][item['id']] = {'name': item.get('name', item['id']),
                                           'zcode': {'modified': True, 'priority': nxt}}

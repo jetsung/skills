@@ -10,10 +10,15 @@ dsh 的 apiKeyEnv 为环境变量名，保留不动；只同步 models
 """
 import json, re, os, shutil, datetime
 import yaml
+import fetch_free
 
 PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 DSH_PATH = os.path.expanduser('~/.dsh/settings.yaml')
 ALIAS = {'cloudflare-workers-ai': 'cloudflare-workers-ai'}  # dsh 有同名渠道，保留可扩展
+# kilo/openrouter 渠道不走 pi models 基准，改从上游 API 提取免费模型（含价格 0，剔除图像/视频类）；
+# opencode 渠道不同步（上游价格数据不正确）
+UPSTREAM_FREE = ('kilo', 'openrouter')
+SKIP_CHANNELS = ('opencode',)
 
 
 def norm(s):
@@ -28,6 +33,9 @@ providers = dsh['llm-pi-ai']['providers']
 
 out = []
 for pname, pdata in pi['providers'].items():
+    if pname in SKIP_CHANNELS:
+        out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
+        continue
     if pname in providers:
         key = pname
     elif ALIAS.get(pname) in providers:
@@ -38,6 +46,15 @@ for pname, pdata in pi['providers'].items():
         out.append(f'跳过 {pname}: dsh 无对应 provider')
         continue
     prov = providers[key]
+    # 模型源：kilo/opencode/openrouter 从上游提取免费模型，其他渠道用 pi models
+    if pname in UPSTREAM_FREE:
+        try:
+            items = fetch_free.fetch_free_models(pname)
+        except Exception as e:
+            items = pdata.get('models', [])
+            out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
+    else:
+        items = pdata.get('models', [])
     if not prov.get('baseURL'):  # 规则：不更新已有值，仅空值补充
         prov['baseURL'] = pdata.get('baseUrl', '')
         out.append(f'{pname}: baseURL 空值补充')
@@ -47,7 +64,7 @@ for pname, pdata in pi['providers'].items():
     models = prov.setdefault('models', [])
     existing = {m['id'] for m in models if isinstance(m, dict)}
     added = []
-    for item in pdata.get('models', []):
+    for item in items:
         mid = item['id']
         if mid in existing:
             continue
