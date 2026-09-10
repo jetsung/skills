@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""上游免费模型提取（kilo / opencode / openrouter 渠道）。
+"""上游免费模型提取（kilo / opencode / openrouter / anyapi 渠道）。
 
-提供 fetch_free_models(channel) -> [{id, name}]：
+提供 fetch_free_models(channel) -> [{id, name, contextWindow?, maxTokens?}]：
 - 免费判定：id 含 :free/-free//free 标签，或 pricing.prompt/completion 均为 0（含临时免费）
 - 剔除图像/视频/音频模型（EXCLUDE 关键词）
 - **最近一年内更新**：created/release 时间早于一年前的剔除（无时间数据的模型保留，
-  如 kilo 的 kilo-auto/free 是聚合入口非真实模型则按 created=0 剔除——见 _recent 规则）
+  如 kilo 的 kilo-auto/free 是聚合入口非真实模型则按 created=0 剔除——见 _recent 规则）。
+  anyapi 渠道的 created 为静态占位值（所有模型均为同一旧时间戳），跳过 recency 检查。
 - **上下文限制**：context 若存在则必须 >100K（无 context 数据的模型保留）
 - 结果缓存 ~/.cache/model-channel-sync/free-{channel}.json（1 小时）；
   上游请求失败时回退上次缓存，无缓存则抛异常（由调用方决定回退 pi models）
+- **限制同步**：API 返回的上下文/最大输出限制随条目一起返回（`contextWindow`/`maxTokens`，
+  仅在有数据时携带）：context 取 `context_length`（顶层或 `top_provider` 内）或
+  `max_input_tokens`（anyapi）；max_output 取 `max_completion_tokens`/`max_output_tokens`
+  （顶层、`top_provider` 或 `architecture.output_length`）；旧缓存缺字段时 .get 为 None，
+  调用方按参考值回退
 """
 import json, os, re, time, urllib.request
 from datetime import date, datetime, timedelta
@@ -17,19 +23,25 @@ BASE = {
     'kilo':       ('https://api.kilo.ai/api/gateway/v1', 'KILO_API_KEY'),
     'opencode':   ('https://opencode.ai/zen/v1', 'OPENCODE_API_KEY'),
     'openrouter': ('https://openrouter.ai/api/v1', 'OPENROUTER_API_KEY'),
+    'anyapi':     ('https://api.anyapi.ai/v1', 'ANYAPI_API_KEY'),
 }
 # 剔除的模型关键词（图像/视频/音频类，不适合编程对话）
 EXCLUDE = ('lyria', 'image', 'video', 'whisper', 'tts')
 # 上下文门槛：context 存在时必须大于该值
 MIN_CONTEXT = 100_000
-# 更新时间门槛：最近一年
+# 更新时间门槧：最近一年
 RECENT_DAYS = 365
+# 渠道级配置：跳过 recency 检查（created 为静态占位值，不反映真实更新时间）
+SKIP_RECENT = ('anyapi',)
 CACHE_DIR = os.path.expanduser('~/.cache/model-channel-sync')
 CACHE_TTL = 3600
 
 
 def _is_free(mid, pricing):
-    """免费判定：free 标签 或 价格（prompt/completion）均为 0"""
+    """免费判定：free 标签 或 价格（prompt/completion）均为 0
+
+    注意：当渠道 API 不提供 pricing 字段时，price=0 路径不可用，
+    仅凭 free 标签判断（如 anyapi）。缺字段不当作 0。"""
     low = mid.lower()
     if any(x in low for x in EXCLUDE):
         return False
@@ -38,8 +50,11 @@ def _is_free(mid, pricing):
     p = pricing or {}
 
     def zero(x):
+        # None/缺字段不视为 0，避免无定价数据的模型被误判为免费
+        if x is None:
+            return False
         try:
-            return float(x or 0) == 0
+            return float(x) == 0
         except (TypeError, ValueError):
             return False
     return zero(p.get('prompt')) and zero(p.get('completion'))
@@ -55,6 +70,18 @@ def _recent(created_ts):
 def _context_ok(ctx):
     """上下文判定：无数据保留（True），有数据必须 > MIN_CONTEXT"""
     return ctx is None or ctx > MIN_CONTEXT
+
+
+def _limits(m):
+    """提取 API 返回的限制：(contextWindow, maxTokens)；无数据返回 None"""
+    tp = m.get('top_provider') or {}
+    arch = m.get('architecture') or {}
+    ctx = (m.get('context_length') or tp.get('context_length')
+           or m.get('max_input_tokens'))
+    mout = (m.get('max_completion_tokens') or m.get('max_output_tokens')
+            or tp.get('max_completion_tokens') or tp.get('max_output_tokens')
+            or arch.get('output_length'))
+    return (ctx or None), (mout or None)
 
 
 def _pretty_name(mid):
@@ -75,10 +102,11 @@ def _pretty_name(mid):
 
 
 def fetch_free_models(channel):
-    """返回渠道上游的免费模型列表 [{id, name}]，带 1 小时缓存与失败回退"""
+    """返回渠道上游的免费模型列表 [{id, name, contextWindow?, maxTokens?}]，带 1 小时缓存与失败回退"""
     if channel not in BASE:
         raise ValueError(f'未知渠道: {channel}')
     base, env = BASE[channel]
+    skip_recent = channel in SKIP_RECENT
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache = os.path.join(CACHE_DIR, f'free-{channel}.json')
     if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < CACHE_TTL:
@@ -100,14 +128,19 @@ def fetch_free_models(channel):
         mid = m['id']
         if not _is_free(mid, m.get('pricing')):
             continue
-        # 最近一年内更新（created；无时间数据的剔除——如 kilo-auto/free 聚合入口）
-        if not _recent(m.get('created', 0)):
+        # 近期更新检查：anyapi 的 created 为静态占位值，跳过
+        if not skip_recent and not _recent(m.get('created', 0)):
             continue
-        # 上下文：context_length 顶层或 top_provider 内；无数据保留
-        ctx = m.get('context_length') or (m.get('top_provider') or {}).get('context_length')
+        # 上下文限制
+        ctx, mout = _limits(m)
         if not _context_ok(ctx):
             continue
-        items.append({'id': mid, 'name': _pretty_name(mid)})
+        item = {'id': mid, 'name': _pretty_name(mid)}
+        if ctx is not None:
+            item['contextWindow'] = ctx
+        if mout is not None:
+            item['maxTokens'] = mout
+        items.append(item)
     with open(cache, 'w') as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
     return items

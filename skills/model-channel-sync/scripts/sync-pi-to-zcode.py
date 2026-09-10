@@ -9,7 +9,8 @@
 - baseURL / kind（兼容模式）：**不更新已有值**，仅当目标缺失/为空时从 pi 补入
   （kind 由 pi 的 api 字段映射：openai-completions → openai-compatible，anthropic → anthropic）
 - apiKey：解析 pi 的 !echo -n "$VAR" 读环境变量，写入明文 options.apiKey
-- models：合并（保留 zcode 现有 + 补 pi 缺失），幂等
+- models：合并（保留 zcode 现有 + 补 pi 缺失），幂等；来源（上游 API / pi 配置）提供 context/max_output
+  限制时，新增条目写入 `limit.context/limit.output`，现有条目不一致即同步更新（来源为权威值）
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显。
 """
 import json, re, os, shutil, datetime
@@ -37,6 +38,7 @@ zc = json.load(open(ZC_PATH))
 zname2key = {norm(p['name']): k for k, p in zc['provider'].items() if 'name' in p}
 
 out = []
+srclim_by_key = {}  # provider key → {模型 id: {context?, output?}}（限制同步的断言放行依据）
 for pname, pdata in pi['providers'].items():
     if pname in SKIP_CHANNELS:
         out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
@@ -69,12 +71,34 @@ for pname, pdata in pi['providers'].items():
              if isinstance(m, dict)]
     nxt = (max(prios) if prios else 99) + 1
     added = []
+    limupd = []
+    srclim = {}  # 模型 id → 来源提供的限制（limit 同步的断言放行依据）
     for item in items:
+        lim = {}
+        if item.get('contextWindow'):
+            lim['context'] = item['contextWindow']
+        if item.get('maxTokens'):
+            lim['output'] = item['maxTokens']
+        if lim:
+            srclim[item['id']] = lim
         if item['id'] not in existing:
-            prov['models'][item['id']] = {'name': item.get('name', item['id']),
-                                          'zcode': {'modified': True, 'priority': nxt}}
+            entry = {'name': item.get('name', item['id'])}
+            if lim:
+                entry['limit'] = lim
+            entry['zcode'] = {'modified': True, 'priority': nxt}
+            prov['models'][item['id']] = entry
             nxt += 1
             added.append(item['id'])
+        elif lim and isinstance(prov['models'].get(item['id']), dict):
+            # 限制同步：来源（上游 API / pi）值为权威，不一致即改写
+            tl = prov['models'][item['id']].setdefault('limit', {})
+            for lk, lv in lim.items():
+                if tl.get(lk) != lv:
+                    limupd.append(f'{item["id"]}.limit.{lk} {tl.get(lk)}→{lv}')
+                    tl[lk] = lv
+    srclim_by_key[key] = srclim
+    if limupd:
+        out.append(f'{pname}: 限制同步 {len(limupd)} 项 {limupd}')
     # apiKey：env 解析（正则含数字）→ 明文写入
     m = re.match(r'!echo -n "\$([A-Z0-9_]+)"', pdata.get('apiKey', ''))
     if m and os.environ.get(m.group(1)):
@@ -93,7 +117,19 @@ assert list(bak['provider'].keys()) == list(zc['provider'].keys()), 'provider �
 for k in zc['provider']:
     b, c = bak['provider'][k], zc['provider'][k]
     bm, cm = b.get('models', {}), c.get('models', {})
-    assert all(bm[kk] == cm[kk] for kk in bm if kk in cm), f'{k}: 现有模型条目被改动'
+    for mk, mv in bm.items():
+        if mk not in cm:
+            continue
+        bv = {kk: vv for kk, vv in mv.items() if kk != 'limit'} if isinstance(mv, dict) else mv
+        cv = {kk: vv for kk, vv in cm[mk].items() if kk != 'limit'} if isinstance(cm[mk], dict) else cm[mk]
+        assert bv == cv, f'{k}: 现有模型条目 {mk} 被改动'
+        blim = (mv.get('limit') or {}) if isinstance(mv, dict) else {}
+        clim = (cm[mk].get('limit') or {}) if isinstance(cm[mk], dict) else {}
+        allow = srclim_by_key.get(k, {}).get(mk, {})
+        for lk, lv in clim.items():
+            if blim.get(lk) != lv:
+                assert allow.get(lk) == lv, \
+                    f'{k}: 现有模型条目 {mk} 的 limit.{lk} 被改动（无来源依据）'
     # kind：已有值不可变，仅允许空→非空
     assert {kk: vv for kk, vv in b.items() if kk not in ('options', 'models', 'kind')} == \
            {kk: vv for kk, vv in c.items() if kk not in ('options', 'models', 'kind')}, f'{k}: 顶层字段被改动'
@@ -108,5 +144,5 @@ for k in zc['provider']:
             assert co.get('baseURL') == vv or (not vv and co.get('baseURL')), f'{k}: baseURL 被改动（已有值）'
         else:
             assert co.get(kk) == vv, f'{k}: options.{kk} 被改动'
-print('校验通过：仅 models 新增 / apiKey 更新 / 空值补充 baseURL+kind')
+print('校验通过：仅 models 新增 / apiKey 更新 / 空值补充 baseURL+kind+limit')
 print('\n'.join(out))

@@ -40,6 +40,7 @@ CHANNEL_DISPLAY = {
     'agnes': 'Agnes', 'cloudflare-workers-ai': 'Cloudflare Workers AI',
     'atomgit': 'AtomGit', 'kilo': 'Kilo', 'v2ex': 'V2EX', 'colab': 'Colab',
     'opencode': 'OpenCode', 'openrouter': 'OpenRouter', 'inferx': 'InferX',
+    'tokenrouter': 'TokenRouter',
 }
 # 顶层不可变字段（兼容模式：不更新已有值；model 为当前选中，允许去前缀规范化与版本族升级）
 IMMUTABLE = ('baseUrl', 'type', 'protocol', 'authType')

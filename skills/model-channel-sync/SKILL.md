@@ -7,6 +7,7 @@ description: >-
   "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"时，都应使用此技能。
   技能通用性强：支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
   提取场景需用户指定：①目标渠道，②筛选方式（按价格=0 / free 标签 / 关键词等），流程为抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论；同步场景需指定源与目标工具，流程为匹配渠道 → 合并模型 → 更新密钥 → 写回校验。
+  若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时会一并更新到配置文件中。
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -234,10 +235,27 @@ done
 用户选择写入时，按工具分别处理。各工具结构不同，**修改格式须与文件中原有条目一致**：
 
 ### pi → `~/.pi/agent/models.json`
-`providers.{渠道}.models` 是**数组**，元素为 `{id, name}`：
+`providers.{渠道}.models` 是**数组**，元素为 `{id, name}`；若 API 返回了 `maxTokens`、`contextWindow`、`reasoning`、`input`、`cost` 等字段，一并写入：
 ```json
-{ "id": "stealth/ox-alpha", "name": "Stealth OX Alpha (Free)" }
+{
+  "id": "stealth/ox-alpha",
+  "name": "Stealth OX Alpha (Free)",
+  "maxTokens": 4096,
+  "contextWindow": 128000
+}
 ```
+**字段映射（API 响应 → pi models.json）**：
+| API 字段 | pi 字段 | 说明 |
+|----------|---------|------|
+| `id` | `id` | 模型标识符 |
+| `name` | `name` | 可读标签 |
+| `max_tokens` / `maxTokens` | `maxTokens` | 最大输出 token 数 |
+| `context_length` / `contextWindow` | `contextWindow` | 上下文窗口大小 |
+| `reasoning` | `reasoning` | 是否支持推理 |
+| `input` | `input` | 输入类型，如 `["text"]` 或 `["text","image"]` |
+| `cost` | `cost` | 计费信息 `{input, output, cacheRead, cacheWrite}` |
+
+写入时以 pi 现有配置结构为准，仅合并/新增模型条目，保留已有条目不变。
 
 ### omp → `~/.omp/agent/models.yml`
 `providers.{渠道}.models` 是 **YAML 列表**：
@@ -411,6 +429,66 @@ python3 scripts/sync-pi-to-qoder-cn.py
 **写入后必须校验**：JSON 用 `python3 -m json.tool`，YAML 用 `python3 -c "import yaml;yaml.safe_load(open(...))"`。
 
 > **是否写入、写入哪些工具由用户决定，不要擅自修改任何配置文件。**
+
+## pi 模型配置参考
+
+pi 的模型配置文件位于 `~/.pi/agent/models.json`，结构为 `providers.{渠道}.models` 数组。完整文档见 [pi.dev/docs/latest/models#model-configuration](https://pi.dev/docs/latest/models#model-configuration)。
+
+### Full Example
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": [
+        {
+          "id": "llama3.1:8b",
+          "name": "Llama 3.1 8B (Local)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 32000,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+### 关键字段说明
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `id` | 是 | — | 模型标识符，传递给 API |
+| `name` | 否 | `id` | 可读标签，用于匹配和显示 |
+| `api` | 否 | 继承 provider 的 `api` | 覆盖 provider 的 API 类型 |
+| `reasoning` | 否 | `false` | 是否支持扩展思考 |
+| `input` | 否 | `["text"]` | 输入类型：`["text"]` 或 `["text", "image"]` |
+| `contextWindow` | 否 | `128000` | 上下文窗口大小（token） |
+| `maxTokens` | 否 | `16384` | 最大输出 token 数 |
+| `samplingParams` | 否 | 省略 | 采样参数，合并到每个请求体 |
+| `cost` | 否 | 全零 | 每百万 token 计费 `{input, output, cacheRead, cacheWrite}` |
+| `compat` | 否 | 继承 provider 的 `compat` | 兼容性覆盖配置 |
+
+### 写入 pi 时的字段映射
+
+从 API 抓取模型信息写入 pi 的 `models.json` 时，字段映射如下：
+
+| API 响应字段 | pi `models.json` 字段 | 说明 |
+|-------------|----------------------|------|
+| `id` | `id` | 模型标识符 |
+| `name` | `name` | 可读标签 |
+| `max_tokens` / `maxTokens` | `maxTokens` | 最大输出 token 数 |
+| `context_length` / `contextWindow` | `contextWindow` | 上下文窗口大小 |
+| `reasoning` | `reasoning` | 是否支持推理 |
+| `input` | `input` | 输入类型 |
+| `cost` | `cost` | 计费信息 |
+
+写入时以 pi 现有配置结构为准，仅合并/新增模型条目，保留已有条目不变。文件每次打开 `/model` 时自动重载，编辑后无需重启。
 
 ## 注意事项
 

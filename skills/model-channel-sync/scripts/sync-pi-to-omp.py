@@ -6,8 +6,9 @@
 
 omp 的 apiKey 为 !echo 环境变量占位符（env 名可能与 pi 不同，如 kilo 用
 NVIDIA_API_KEY 而 pi 用 KILO_API_KEY），保留不动，避免破坏连接；只同步
-models（YAML 列表，元素 {id, name}）。幂等可重复执行；
-自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增；密钥不回显。
+models（YAML 列表，元素 {id, name}）。pi 条目提供 contextWindow/maxTokens 限制时，
+新增条目一并写入，现有条目不一致即同步更新（来源为权威值）。
+幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增与限制字段同步；密钥不回显。
 """
 import json, re, os, shutil, datetime
 import yaml
@@ -27,6 +28,7 @@ omp = yaml.safe_load(open(OMP_PATH))
 providers = omp['providers']
 
 out = []
+srclim_by_key = {}  # provider key → {模型 id: {contextWindow?, maxTokens?}}（限制同步的断言放行依据）
 for pname, pdata in pi['providers'].items():
     if pname in providers:
         key = pname
@@ -45,12 +47,28 @@ for pname, pdata in pi['providers'].items():
     models = prov.setdefault('models', [])
     existing = {m['id'] for m in models if isinstance(m, dict)}
     added = []
+    limupd = []
+    srclim = {}
     for item in pdata.get('models', []):
         mid = item['id']
-        if mid in existing:
-            continue
-        models.append({'id': mid, 'name': item.get('name', mid)})
-        added.append(mid)
+        lim = {k: item[k] for k in ('contextWindow', 'maxTokens') if item.get(k)}
+        if lim:
+            srclim[mid] = lim
+        if mid not in existing:
+            entry = {'id': mid, 'name': item.get('name', mid)}
+            entry.update(lim)
+            models.append(entry)
+            added.append(mid)
+        else:
+            for mm in models:
+                if isinstance(mm, dict) and mm.get('id') == mid:
+                    for lk, lv in lim.items():
+                        if mm.get(lk) != lv:
+                            limupd.append(f'{mid}.{lk} {mm.get(lk)}→{lv}')
+                            mm[lk] = lv
+    srclim_by_key[key] = srclim
+    if limupd:
+        out.append(f'{pname}: 限制同步 {len(limupd)} 项 {limupd}')
     out.append(f'{pname}: 新增模型 {len(added)} 个 {added if added else ""}')
 
 with open(OMP_PATH, 'w') as f:
@@ -62,7 +80,21 @@ assert list(bprov.keys()) == list(cprov.keys()), 'provider 键序被改动'
 for k in cprov:
     bm = [m for m in bprov[k].get('models', []) if isinstance(m, dict)]
     cm = [m for m in cprov[k].get('models', []) if isinstance(m, dict)]
-    assert all(m in cm for m in bm), f'{k}: 现有模型条目被改动'
+    bidx = {m['id']: m for m in bm}
+    cidx = {m['id']: m for m in cm}
+    allow_all = srclim_by_key.get(k, {})
+    for bid, bmv in bidx.items():
+        if bid not in cidx:
+            assert False, f'{k}: 现有模型条目 {bid} 被删除'
+        cmv = cidx[bid]
+        allow = allow_all.get(bid, {})
+        for lk in ('contextWindow', 'maxTokens'):
+            if bmv.get(lk) != cmv.get(lk):
+                assert allow.get(lk) == cmv.get(lk), \
+                    f'{k}: 现有模型条目 {bid} 的 {lk} 被改动（无来源依据）'
+        assert {kk: vv for kk, vv in bmv.items() if kk not in ('contextWindow', 'maxTokens')} == \
+               {kk: vv for kk, vv in cmv.items() if kk not in ('contextWindow', 'maxTokens')}, \
+            f'{k}: 现有模型条目 {bid} 被改动'
     for kk, vv in bprov[k].items():
         if kk == 'models':
             continue
@@ -70,5 +102,5 @@ for k in cprov:
             assert cprov[k].get(kk) == vv or (not vv and cprov[k].get(kk)), f'{k}: {kk} 被改动（已有值）'
         else:
             assert cprov[k].get(kk) == vv, f'{k}: 字段 {kk} 被改动'
-print('校验通过：仅 models 新增')
+print('校验通过：仅 models 新增 / 限制字段同步')
 print('\n'.join(out))
