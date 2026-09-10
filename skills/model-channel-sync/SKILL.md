@@ -396,7 +396,8 @@ python3 scripts/sync-pi-to-qoder-cn.py
 - **展开**：每供应商的模型全部补入 models 数组；**模型筛选**：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道**全量同步**；**模型 displayName 统一为 `{渠道显示名} - {模型名}` 格式**（如 `NewAPI - Sense DeepSeek Latest Flash`、`Sense - DeepSeek V4 Flash`；模型名已以渠道名开头则去重，如 amd 的 `AMD DeepSeek V4 Flash` → `AMD - DeepSeek V4 Flash`）
 - **模型 id 保持 pi 原样**：不得擅自添加任何前缀（sense 渠道的 `deepseek-v4-flash` 就是 `deepseek-v4-flash`，不写 `sense/deepseek-v4-flash`；newapi 渠道的 `amd/deepseek-latest-flash` 本身带前缀则原样保留）；当前选中模型 `model` 字段同样用 pi 原样 id
 - `apiKey`：**写死实值**（qoder-cn 不支持 env 引用），每 provider 只写归属渠道的 env 值
-- 顶层 `baseUrl`/`type`/`protocol`/`authType` 同步时**不动**；`model`（当前选中）用 pi 原样 id（仅允许去误加前缀规范化）；`displayName` 在 baseUrl 匹配/新建时更新为渠道显示名，弱匹配时已有值保留（空值补充）
+- 顶层 `baseUrl`/`type`/`protocol`/`authType` 同步时**不动**；`model`（当前选中）用 pi 原样 id（允许去误加前缀规范化 + **版本族升级**，见下条）；`displayName` 在 baseUrl 匹配/新建时更新为渠道显示名，弱匹配时已有值保留（空值补充）
+- **默认模型版本族规则（`model` 字段）**：同族（同一产品的不同版本号）模型存在更高版本时，`model` 自动取**同族最高版本**——如渠道 models 含 `agnes-2.0-flash`/`agnes-2.5-flash`/`agnes-3.0-flash` 而 `model` 为 `agnes-2.5-flash` 时，应升级为 `agnes-3.0-flash`。族键提取：模型 id 取**最后一个 `/` 后的段**（无 `/` 取全段）小写后提取**开头连续字母**（`^[a-z]+`，提取不到用整段，如 `agnes-2.5-flash` → `agnes`、`qwen3.8-27b` → `qwen`）；版本号 = 该段**首个数字串**（`2.5` → `(2,5)`，无数字 → 空元组视为最低）。同版本或均无版本号一律不动（幂等）；`model` 为空时取首个模型同族的最高版本
 
 共同要点：
 - opencode/dsh/omp 三工具的 apiKey 均为环境变量引用（非明文），同步时保留目标现有引用，只合并 models（保留现有 + 补 pi 缺失）；**qoder-cn 例外：apiKey 写死实值**
@@ -421,7 +422,7 @@ python3 scripts/sync-pi-to-qoder-cn.py
 - 写入多工具配置时，务必匹配各工具（pi/omp/opencode/dsh/zcode/qoder-cn）不同的结构格式，并校验。
 - dsh 的 models 元素只含 `id`，且路径是 `llm-pi-ai.providers.{渠道}`，不要与 pi 的 `providers.{渠道}` 混淆。
 - zcode 的渠道 key 是 UUID（自定义）或 `builtin:xxx`（内置），`options.apiKey` 为明文，`models` 是对象 map（key=模型 id，value=含 name/limit/zcode 的对象），与 pi/omp/dsh 的数组结构不同；`kind: anthropic` 的渠道无 `/models` 端点，模型列表从配置读取。
-- qoder-cn 的渠道 key 是 `qoder-custom-{UUID}`，`apiKey` 为明文且位于渠道顶层（非 zcode 的 `options` 内），`models` 是数组、id 字段名为 `model`，`baseUrl` 是顶层小写 l 形式——与 zcode 的 `options.apiKey`/`options.baseURL`/models map、dsh 的 `baseURL` 全大写均不同；每渠道独立 provider + 独立密钥 + 独立模型（模型归属按短 id 匹配渠道，其它渠道模型迁出），`baseUrl`/`type`/`protocol`/`authType`/`model` 不动。
+- qoder-cn 的渠道 key 是 `qoder-custom-{UUID}`，`apiKey` 为明文且位于渠道顶层（非 zcode 的 `options` 内），`models` 是数组、id 字段名为 `model`，`baseUrl` 是顶层小写 l 形式——与 zcode 的 `options.apiKey`/`options.baseURL`/models map、dsh 的 `baseURL` 全大写均不同；每渠道独立 provider + 独立密钥 + 独立模型（模型归属按短 id 匹配渠道，其它渠道模型迁出），`baseUrl`/`type`/`protocol`/`authType` 不动；`model`（当前选中）随同步做**版本族升级**：id 末段（`/` 后）开头连续字母为族键、首个数字串为版本号，同族存在更高版本时自动改用最新版（`agnes-2.5-flash` → `agnes-3.0-flash`）。
 - 模型筛选与显示：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道全量同步；kilo/openrouter 渠道同步到 zcode/dsh/qoder-cn 时改从**上游提取免费模型**（`scripts/fetch_free.py`，须同时满足：free 标签或价格为 0、**最近一年内更新**、**context 存在时 >100K**，剔除图像/视频类）；**opencode 渠道不同步**（上游价格数据不正确）；模型 displayName/name 统一为 **`{渠道显示名} - {模型名}`** 格式（如 `NewAPI - Sense DeepSeek Latest Flash`、`Sense - DeepSeek V4 Flash`，模型名已含渠道名则去重）。
 - 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件。
 - 环境变量名正则须含数字（`[A-Z0-9_]+`）；bash 传参用 heredoc 避免 `\$`/`\"` 转义被吞；写回前备份、写回后对比备份断言只动了目标字段。

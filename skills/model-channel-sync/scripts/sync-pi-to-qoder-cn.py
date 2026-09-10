@@ -16,7 +16,10 @@
   即使 id 前缀与其它渠道同名（sense/deepseek-v4-flash）也是独立模型，归 newapi
 - **模型 id**：保持 pi 原有 id 原样，不得擅自添加任何前缀（如 sense 渠道的 `deepseek-v4-flash` 就是 `deepseek-v4-flash`，不写 `sense/deepseek-v4-flash`；newapi 渠道的 `amd/deepseek-latest-flash` 本身带前缀则原样保留）
 - **displayName**：baseUrl 匹配/新建时更新为渠道显示名（纠正错误归属）；弱匹配（ALIAS/displayName）时已有值保留、空值补充
-- **兼容模式**：baseUrl / type / protocol / authType / model（当前选中）**不更新已有值**；新建时按现有条目格式初始化
+- **兼容模式**：baseUrl / type / protocol / authType **不更新已有值**；新建时按现有条目格式初始化
+- **默认模型（model 字段）版本族规则**：族键 = 模型 id 取最后一个 `/` 后的段（无 `/` 取全段）小写后的开头连续字母（`^[a-z]+`，提取不到用整段）；
+  版本号 = 该段首个数字串（`agnes-2.5-flash` → 族 `agnes`、版本 `(2, 5)`；无数字 → `()`）。models 中同族存在更高版本时，
+  model 自动升级为同族最高版本（如 agnes-2.0/2.5/3.0-flash 用 agnes-3.0-flash）；model 为空时取首个模型同族最高版本；同版本/无版本号一律不动
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显。
 """
 import json, re, os, shutil, datetime, uuid
@@ -38,7 +41,7 @@ CHANNEL_DISPLAY = {
     'atomgit': 'AtomGit', 'kilo': 'Kilo', 'v2ex': 'V2EX', 'colab': 'Colab',
     'opencode': 'OpenCode', 'openrouter': 'OpenRouter', 'inferx': 'InferX',
 }
-# 顶层不可变字段（兼容模式：不更新已有值；model 为当前选中，允许去前缀规范化）
+# 顶层不可变字段（兼容模式：不更新已有值；model 为当前选中，允许去前缀规范化与版本族升级）
 IMMUTABLE = ('baseUrl', 'type', 'protocol', 'authType')
 
 
@@ -49,6 +52,22 @@ def norm(s):
 def short_id(mid):
     return mid.split('/')[-1].lower()
 
+
+FAM_RE = re.compile(r'^[a-z]+')
+VER_RE = re.compile(r'\d+(?:\.\d+)*')
+
+
+def fam_key(mid):
+    """版本族键：id 最后一个 / 后的段（无 / 取全段）小写后提取开头连续字母；提取不到用整段"""
+    s = (mid or '').rsplit('/', 1)[-1].lower()
+    g = FAM_RE.match(s)
+    return g.group() if g else s
+
+
+def ver_key(mid):
+    """版本号键：id 最后一段的首个数字串（agnes-2.5-flash → (2, 5)）；无数字 → ()"""
+    g = VER_RE.search((mid or '').rsplit('/', 1)[-1].lower())
+    return tuple(int(x) for x in g.group().split('.')) if g else ()
 
 def wanted(item, pname):
     """模型筛选：openrouter/opencode 渠道只同步免费模型（id 含 free）；其他渠道全量同步"""
@@ -259,6 +278,18 @@ for pname, pdata in pi['providers'].items():
         existing.add(mid)
         added.append(mid)
 
+    # 默认模型（model）版本族规则：选中模型同族存在更高版本 → 升级到同族最高版本；
+    # 选中为空 → 取首个模型同族的最高版本；同版本或均无版本号一律不动（幂等）
+    model_ids = [mm['model'] for mm in prov['models']]
+    cur = prov.get('model', '')
+    base = cur if cur in model_ids else (model_ids[0] if model_ids else '')
+    if base:
+        same = [m for m in model_ids if fam_key(m) == fam_key(base)]
+        best = max(same, key=ver_key)
+        if best != cur and (cur == '' or ver_key(best) > ver_key(cur)):
+            out.append(f'{pname}: 默认模型 {cur or "(空)"} → {best}（{fam_key(base)} 族最高版本）')
+            prov['model'] = best
+
     # displayName：baseUrl/新建时更新为渠道显示名（纠正归属）；弱匹配已有值保留、空值补充
     disp = CHANNEL_DISPLAY.get(pname, pname)
     if how in ('baseurl', 'created'):
@@ -284,7 +315,7 @@ with open(QODER_PATH, 'w') as f:
     f.write('\n')
 
 bak = json.load(open(QODER_PATH + '.bak-' + stamp))
-# 断言：原键序保留（新键追加）；baseUrl/type/protocol/authType/model 不变；
+# 断言：原键序保留（新键追加）；baseUrl/type/protocol/authType 不变（model 允许去前缀规范化与版本族升级）；
 # models 允许新增（目标模型）与迁出（属其他渠道的模型）；apiKey/displayName 允许变
 bkeys = list(bak['providers'].keys())
 ckeys = list(qc['providers'].keys())
