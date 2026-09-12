@@ -7,6 +7,7 @@
 - [项目简介](#项目简介)
 - [Skills 列表](#skills-列表)
   - [git-commit-me](#git-commit-me)
+  - [flarum-publish](#flarum-publish)
   - [huawei-deveco-studio-fetch](#huawei-deveco-studio-fetch)
   - [incremental-translate](#incremental-translate)
   - [incremental-translation](#incremental-translation)
@@ -44,6 +45,37 @@ feat(utils): 添加常用工具函数
 - 添加日期格式化函数
 - 添加字符串截断函数
 - 添加深拷贝函数
+```
+
+---
+
+### flarum-publish
+
+> 发布文章（主题）到 Flarum 论坛：通过 REST API 创建讨论，支持按名称匹配标签；也可将 GitHub 项目链接整理为中文论坛文章后发布。
+
+- **触发场景**：发布/投稿文章到 Flarum 论坛、同步内容到论坛、把 GitHub 项目整理成论坛文章
+- **路径**：`skills/flarum-publish/`
+- **依赖**：`curl`、`python3`；环境变量 `FLARUM_URL`、`FLARUM_TOKEN`（可选 `FLARUM_USER_ID`）
+
+**特性：**
+
+- 支持两种认证方式：API Key（`Token <key>; userId=<id>`）与 Access Token（`/api/token` 换取）
+- 标签按名称或 slug 自动匹配 ID，匹配失败时列出可用标签
+- 正文支持 Markdown，通过 JSON:API 规范的 `POST /api/discussions` 创建
+- 提供 GitHub 项目 → 中文文章工作流（`docs/github-article.md`）与文章模板（`examples/demo.md`）
+- 发布前须经用户确认，发布成功后返回讨论链接
+
+**用法：**
+
+```bash
+# 基本用法（无标签）
+skills/flarum-publish/scripts/publish.sh "标题" /path/to/article.md
+
+# 带标签（名称或 ID，多个用逗号分隔）
+skills/flarum-publish/scripts/publish.sh "标题" /path/to/article.md "问答,教程"
+
+# 正文从 stdin 读入
+cat article.md | skills/flarum-publish/scripts/publish.sh "标题" -
 ```
 
 ---
