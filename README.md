@@ -6,7 +6,11 @@
 
 - [项目简介](#项目简介)
 - [Skills 列表](#skills-列表)
-  - [git-commit](#git-commit)
+  - [git-commit-me](#git-commit-me)
+  - [huawei-deveco-studio-fetch](#huawei-deveco-studio-fetch)
+  - [incremental-translate](#incremental-translate)
+  - [incremental-translation](#incremental-translation)
+  - [model-channel-sync](#model-channel-sync)
   - [update-gh-action-version](#update-gh-action-version)
 - [安装](#安装)
 - [添加新 Skill](#添加新-skill)
@@ -18,12 +22,12 @@
 
 ## Skills 列表
 
-### git-commit
+### git-commit-me
 
 > 生成符合 [Conventional Commits](https://www.conventionalcommits.org/) 规范的 git 提交信息，描述部分使用简体中文。
 
 - **触发场景**：提交代码、生成 commit message
-- **路径**：`skills/git-commit/`
+- **路径**：`skills/git-commit-me/`
 
 **特性：**
 
@@ -44,13 +48,77 @@ feat(utils): 添加常用工具函数
 
 ---
 
+### huawei-deveco-studio-fetch
+
+> 提取华为 DevEco Studio / Command Line Tools 的下载地址与 SHA-256 校验值。不真正下载文件，仅读取响应头 `x-amz-content-sha256`。
+
+- **触发场景**：从华为开发者联盟下载中心获取 DevEco Studio / Command Line Tools 的签名下载链接与校验和
+- **路径**：`skills/huawei-deveco-studio-fetch/`
+- **依赖**：`chrome-devtools` MCP（浏览器需以真正 headless 模式运行）
+
+**特性：**
+
+- 按「最新版本」页卡片顺序提取 DevEco Studio Release/Beta（Mac x86）与 Command Line Tools Release/Beta（Linux x86）的下载地址与 SHA-256
+- 通过触发下载请求读取响应头获取哈希，文件不落盘
+- 结果回显并保存至 `/tmp/deveco.txt`
+
+---
+
+### incremental-translate
+
+> 对中文文档项目做「段落级增量翻译」：只提取源文档相对上次提交的变更段落交给内置 LLM 翻译，未改动部分复用已有译文，并自动清理已删除文档对应的中文译文。
+
+- **触发场景**：上游文档小幅更新（尤其 changelog 等超大文件）时避免整篇重翻、节省 token
+- **路径**：`skills/incremental-translate/`
+- **依赖**：内置 LLM（本工具）、git；不依赖第三方翻译工具
+
+**特性：**
+
+- 通过环境变量（`PROJECT_ROOT`、`DOCS_DIR`、`ZH_DIR`、`BASE_REF`）适配任意项目，零配置自动探测常见目录
+- 提供 `sync-source.sh` / `prepare.sh` / `apply.sh` 三阶段工作流
+- 自动清理上游已删除文档对应的中文译文
+
+---
+
+### incremental-translation
+
+> 通用中文文档项目的增量更新与 AI 翻译工作流：拉取上游最新文档、对比改动、生成待翻译列表并执行增量翻译。
+
+- **触发场景**：基于 `deploy.sh` 约定的文档项目需要整体增量更新与翻译
+- **路径**：`skills/incremental-translation/`
+- **依赖**：项目根目录的 `deploy.sh`（约定 `UPSTREAM_URL`、`BRANCH` 等环境变量）、`aitr` CLI 工具
+
+**特性：**
+
+- 不绑定特定项目，通过环境变量适配任意文档仓库，同一 skill 可复用于多个项目
+- 一键完成「拉取上游 → 清理已删除文档 → 识别新增/修改文件 → 增量翻译」
+- 翻译环节可配合 `incremental-translate` skill 进一步节省 token
+
+---
+
+### model-channel-sync
+
+> 管理 AI 模型渠道配置：①提取真正可用的免费/零价模型；②以 pi 等平台配置为基准，将渠道、模型、APIKEY 同步到多个 agent 工具的配置文件。
+
+- **触发场景**：查询渠道免费模型、测试模型可用性、把模型/密钥同步到 pi、omp、opencode、dsh、zcode、qoder-cn 等工具
+- **路径**：`skills/model-channel-sync/`
+- **依赖**：`curl`、`python3`、目标渠道的 `baseUrl` 与 `apiKey`
+
+**特性：**
+
+- 支持 openrouter、kilo、opencode、newapi、nvidia、atomgit 等所有 OpenAI 兼容渠道
+- 「抓取 → 筛选（按价格=0 / free 标签 / 关键词）→ 连通性实测 → 剔除不可用」完整闭环
+- 按各工具配置文件结构（pi / omp / opencode / dsh / zcode / qoder-cn）分别匹配渠道、合并模型、更新密钥并写回校验
+
+---
+
 ### update-gh-action-version
 
 > 自动检测并更新 GitHub Actions 工作流文件中使用的 Action 版本至最新主版本。
 
 - **触发场景**：需要升级 workflow 中的 action 版本
 - **路径**：`skills/update-gh-action-version/`
-- **依赖**：`curl`、`sed`、GitHub API 访问
+- **依赖**：`curl`、`sed`、GitHub API 访问（可设置 `GITHUB_TOKEN` 提高速率限制）
 
 **用法：**
 
@@ -108,4 +176,3 @@ description: 简要描述 skill 的功能与使用场景
 ## 仓库镜像
 
 [MyCode](https://git.jetsung.com/jetsung/skills) ● [AtomGit](https://atomgit.com/jetsung/skills) ● [GitHub](https://github.com/jetsung/skills)
-

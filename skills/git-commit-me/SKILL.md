@@ -1,8 +1,8 @@
 ---
-name: git-commit
+name: git-commit-me
 description: Generates standardized git commit messages following the Conventional Commits format with Chinese descriptions. Use when committing changes, creating git commits, or writing commit messages.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
 ---
 
 # Git Commit Message Generation
