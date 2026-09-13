@@ -1,8 +1,8 @@
 ---
 name: flarum-publish
-description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签；也可将 GitHub 项目链接整理为中文文章后发布。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛，或要求把 GitHub 项目整理成论坛文章时使用。
+description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛，或要求把 GitHub 项目整理成论坛文章时使用。
 metadata:
-  version: "1.4.0"
+  version: "1.7.0"
 ---
 
 # Flarum 文章发布
@@ -17,8 +17,11 @@ metadata:
 - [网络规则（中国网络代理）](#网络规则中国网络代理)
 - [认证](#认证)
 - [发布流程](#发布流程)
+- [查重](#查重)
+- [标签策略](#标签策略)
 - [API 端点](#api-端点)
 - [错误处理](#错误处理)
+- [图片选择](#图片选择)
 - [使用脚本](#使用脚本)
 - [约束](#约束)
 
@@ -74,13 +77,89 @@ metadata:
 
 1. **准备内容**（两条路径任选）：
    - **用户提供文章/文件**：确认标题与正文。正文使用 Markdown（Flarum 首帖支持 Markdown 格式存储）。若用户提供的是文件路径，读取全文作为正文；若未提供标题，从正文提炼。
-   - **用户提供 GitHub 项目链接**（如 `https://github.com/<owner>/<repo>`）：按 [docs/github-article.md](docs/github-article.md) 的工作流采集仓库信息（API 元数据 + README），套用 [examples/demo.md](examples/demo.md) 模板整理成中文文章（成品参照 [examples/openshot.md](examples/openshot.md)），**保存为临时文件（默认 `/tmp/article.md`）**，再发布。注意：`# <项目名称>：<描述>` 一级标题既是讨论标题，也是文章正文的首行，需保留在正文文件的第一行。
-2. **确认信息**：发布前向用户展示 标题 / 正文摘要 / 目标标签，确认后再发布。这是对外可见的公开操作，必须经用户确认。
-3. **解析标签**（可选）：
-   - 用户给出标签名称时，先查询标签 ID：`GET /api/tags`（响应的 `included` 或 `data` 中有各标签的 `id`、`attributes.slug`、`attributes.name`）。
-   - 按名称或 slug 模糊匹配；匹配不到时列出可用标签让用户选择，不要随意指定 ID。
-4. **发布**：调用 `scripts/publish.sh`（见[使用脚本](#使用脚本)）。
-5. **验证**：脚本输出新讨论的 ID 与链接（`$FLARUM_URL/d/<id>`），向用户报告。
+   - **用户提供 GitHub 项目链接**（如 `https://github.com/<owner>/<repo>`）：按 [docs/github-article.md](docs/github-article.md) 的工作流采集仓库信息（API 元数据 + README），套用 [examples/demo.md](examples/demo.md) 模板整理成中文文章（成品参照 [examples/openshot.md](examples/openshot.md)），**保存为临时文件（默认 `/tmp/article.md`）**，再发布。注意：标题为 `<项目名称>：<总结性定位>`，**从 README 总结提炼、20 汉字以内、不照搬 GitHub API 的 description**（见 [docs/github-article.md](docs/github-article.md) 写作要求）。**标题与正文第一行必须一致**：正文第一行写 `# <标题>`（带 `# ` 前缀的 Markdown 一级标题），发布时传给 `publish.sh` 的标题参数为去掉 `# ` 前缀的同一字符串，两者内容完全一致。
+2. **查重**：从标题提取项目名称，搜索论坛检查是否已存在该项目讨论（见[查重](#查重)）。已存在时向用户展示已有讨论并询问是否仍要发布。
+3. **确认信息**：发布前向用户展示 标题 / 正文摘要 / 目标标签 / 图片（如有），确认后再发布。这是对外可见的公开操作，必须经用户确认。图片需展示完整 URL 供用户点击查看。
+4. **确定标签**：按 [标签策略](#标签策略) 选择标签组。默认组 `[55,57]`（开源项目、开源社区），AI 项目组 `[63,86]`（人工智能、AI 项目）。GitHub 项目还需追加语言标签（见标签策略）。最终标签以逗号分隔的 ID 传给 `publish.sh`。
+5. **发布**：调用 `scripts/publish.sh`（见[使用脚本](#使用脚本)）。
+6. **验证**：脚本输出新讨论的 ID 与链接（`$FLARUM_URL/d/<id>`），向用户报告。
+
+## 查重
+
+发布前检查论坛是否已存在相同项目的讨论，避免重复发布。
+
+### 提取项目名称
+
+- 标题格式为 `<项目名>：<描述>`（如「Windmill：开源的开发者平台」）时，冒号前的部分即项目名（「Windmill」）。
+- 无冒号时：GitHub 项目用仓库名（`<owner>/<repo>` 的 `<repo>` 部分）；普通文章用标题本身。
+
+### 搜索论坛
+
+两种方式任选：
+
+1. **页面搜索**（推荐，所见即所得）：用浏览器打开 `$FLARUM_URL/?q=<项目名>`（如 `https://forum.example.com/?q=Windmill`），查看搜索结果中是否已存在同名/同项目讨论。
+2. **API 搜索**：`GET "$FLARUM_URL/api/discussions?filter[q]=<项目名>"`。注意 `[q]` 方括号需 curl 加 `--globoff` 或 URL 编码，响应 `data[].attributes.title` 为匹配的讨论标题。
+
+### 决策
+
+- **已存在**该项目讨论时：向用户展示已有讨论的标题与链接，询问是跳过（不发布）还是仍要发布（如更新版、不同角度文章）。
+- **未存在**时：继续正常发布流程。
+- 项目名过短或过于通用（如 "app"、"tool"）导致结果过多时，用 GitHub 完整仓库名（`<owner>/<repo>`）或项目全名重新搜索确认。
+
+## 标签策略
+
+### 标签缓存
+
+标签列表缓存于 `~/.cache/flarum_idev_tags`（Flarum `GET /api/tags?include=parent` 的原始 JSON 响应）。
+
+- 文件不存在时，运行 `scripts/fetch_tags.sh` 自动获取并保存（`publish.sh` 在需要解析标签名称时也会自动调用）。
+- 刷新缓存：`scripts/fetch_tags.sh --force`。
+- 查看可用标签：直接读取缓存文件，或运行 `fetch_tags.sh`（已存在时输出摘要）。
+
+### 常用标签组
+
+| 分组 | Tag IDs | 标签 | 适用场景 |
+| --- | --- | --- | --- |
+| 默认（开源项目） | `55, 57` | 开源项目、开源社区 | 一般开源项目 |
+| AI 项目 | `63, 86` | 人工智能、AI 项目 | AI / LLM / 机器学习相关项目 |
+
+### 标签选择规则
+
+1. **判断项目类型**：根据项目描述、README 内容、GitHub `topics` 等判断是否为 AI 相关项目。
+   - 涉及 LLM、大模型、机器学习、深度学习、AI 工具/平台/教程、自然语言处理、计算机视觉等 → AI 项目，使用 `[63, 86]`。
+   - 其他 → 默认组 `[55, 57]`。
+   - 无法确定时，向用户确认。
+
+2. **追加语言标签**（GitHub 项目，**自动化步骤，无需用户指定**）：从 GitHub API 获取项目占比最大的语言（`GET /repos/<owner>/<repo>` 返回的 `language` 字段），在标签缓存中查找匹配的语言标签并自动追加。用户只需确认标签组（步骤 1）与最终标签列表，不参与语言标签的选择。
+   - GitHub 语言 → Flarum 标签对照（slug 不区分大小写匹配）：
+
+     | GitHub 语言 | Flarum slug | Tag ID |
+     | --- | --- | --- |
+     | Python | `python` | 21 |
+     | Go | `go` | 18 |
+     | Rust | `rust` | 20 |
+     | PHP | `php` | 19 |
+     | JavaScript | `javascript` | 43 |
+     | TypeScript | `typescript` | 58 |
+     | Java | `java` | 59 |
+     | C / C++ | `cpp` | 39 |
+     | C# | `csharp` | 46 |
+     | Ruby | `ruby` | 78 |
+     | Dart | `dart` | 60 |
+     | Kotlin | `kotlin` | 68 |
+     | Swift | `swift` | 84 |
+     | Shell | `shell` | 44 |
+     | Lua | `lua` | 22 |
+     | Zig | `zig` | 72 |
+     | Vue | `vue` | 27 |
+     | HTML | `html` | 5 |
+     | PowerShell | `powershell` | 83 |
+     | Dockerfile | `docker` | 26 |
+
+   - 以上对照表为已知映射；遇到未列出的语言时，从标签缓存中按名称/slug 模糊匹配，匹配不到则跳过，不追加。
+   - 最终标签组 = 基础标签组 + 语言标签（去重）。
+
+3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.sh` 的第三个参数，如 `"$SKILL_PATH/scripts/publish.sh" "标题" /tmp/article.md "55,57,21"`。
 
 ## API 端点
 
@@ -159,22 +238,54 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 | 422 | `validation_error` | 字段校验失败，`source.pointer` 指出无效字段（如 `/data/attributes/title`），`detail` 为具体原因；同一字段可能同时有多条错误 |
 | 401/403 | — | 认证失败或无权限（如无发帖权限、recaptcha 插件拦截） |
 
+## 图片选择
+
+当文章需要配图时（尤其是 GitHub 项目），**必须由用户确认是否添加图片以及选择哪张图片**，不要自动指定。
+
+### 流程
+
+1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge）等非实质图片。
+2. **拼接完整 URL**：相对路径拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>`。
+3. **展示并选择**：用 `ask` 工具向用户展示候选图片，每个选项须：
+   - `label`：简短描述（如「架构图」「效果对比图」）。
+   - `description`：完整图片 URL（方便用户点击查看）。
+   - `preview`：可选，渲染图片预览供直接查看。
+   - 提供「不添加图片」选项。
+   - 多张图片时可设 `multi: true` 允许多选。
+4. **写入正文**：用户选定后，以 `![<alt>](<完整URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。正文中的图片 URL 使用原始地址（不加代理前缀）。
+
+### 注意事项
+
+- 若用户论坛有图片转存习惯（如将 GitHub 图片转存到论坛图床），提示用户先转存，正文使用转存后的 URL。
+
 ## 使用脚本
 
-优先使用 `scripts/publish.sh`（`SKILL_PATH` 为本 skill 根目录的绝对路径）：
+### publish.sh — 发布讨论
 
 ```bash
 # 基本用法（无标签）
 "$SKILL_PATH/scripts/publish.sh" "标题" /path/to/article.md
 
-# 带标签（名称或 ID，多个用逗号分隔）
-"$SKILL_PATH/scripts/publish.sh" "标题" /path/to/article.md "问答,教程"
+# 带标签（ID 或名称，多个用逗号分隔）
+"$SKILL_PATH/scripts/publish.sh" "标题" /path/to/article.md "55,57,21"
 
 # 正文从 stdin 读入
 cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 ```
 
-正文也可用 `-` 从 stdin 读入。脚本依赖 `curl`、`python3`（用于构造 JSON，避免转义问题）与上述环境变量。
+正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.sh` 获取）。脚本依赖 `curl`、`python3` 与上述环境变量。
+
+### fetch_tags.sh — 获取标签缓存
+
+```bash
+# 首次获取或检查缓存
+"$SKILL_PATH/scripts/fetch_tags.sh"
+
+# 强制刷新缓存
+"$SKILL_PATH/scripts/fetch_tags.sh" --force
+```
+
+标签缓存文件：`~/.cache/flarum_idev_tags`（原始 API JSON 响应）。
 
 ### 示例文件
 
@@ -183,7 +294,7 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 
   ```bash
   "$SKILL_PATH/scripts/publish.sh" "OpenShot：开源的视频编辑软件" \
-    "$SKILL_PATH/examples/openshot.md" "开源项目"
+    "$SKILL_PATH/examples/openshot.md" "55,57"
   ```
 
 由 GitHub 项目生成的待发布文章是临时产物，默认保存到 `/tmp`（如 `/tmp/article.md`），不落入 skill 目录；成品内容示例见 [docs/github-article.md](docs/github-article.md)。
