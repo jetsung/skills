@@ -2,7 +2,7 @@
 name: flarum-publish
 description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛，或要求把 GitHub 项目整理成论坛文章时使用。
 metadata:
-  version: "1.7.0"
+  version: "1.8.0"
 ---
 
 # Flarum 文章发布
@@ -95,16 +95,38 @@ metadata:
 
 ### 搜索论坛
 
-两种方式任选：
+按以下顺序依次尝试，**两层搜索都未命中**才可判定「未存在」：
 
-1. **页面搜索**（推荐，所见即所得）：用浏览器打开 `$FLARUM_URL/?q=<项目名>`（如 `https://forum.example.com/?q=Windmill`），查看搜索结果中是否已存在同名/同项目讨论。
-2. **API 搜索**：`GET "$FLARUM_URL/api/discussions?filter[q]=<项目名>"`。注意 `[q]` 方括号需 curl 加 `--globoff` 或 URL 编码，响应 `data[].attributes.title` 为匹配的讨论标题。
+#### 第一层：讨论标题搜索（`/api/discussions`）
 
-### 决策
+```bash
+curl -s --globoff "$FLARUM_URL/api/discussions?filter[q]=<项目名>"
+```
 
-- **已存在**该项目讨论时：向用户展示已有讨论的标题与链接，询问是跳过（不发布）还是仍要发布（如更新版、不同角度文章）。
-- **未存在**时：继续正常发布流程。
-- 项目名过短或过于通用（如 "app"、"tool"）导致结果过多时，用 GitHub 完整仓库名（`<owner>/<repo>`）或项目全名重新搜索确认。
+- 注意 `[q]` 方括号需 curl 加 `--globoff` 或 URL 编码。
+- 响应 `data[].attributes.title` 为匹配的讨论标题，逐一检查是否为同一项目。
+- **局限**：该搜索不一定能覆盖所有讨论（项目名不在标题中时可能搜不到）。此时必须进入第二层，不可直接判定「未存在」。
+
+#### 第二层：帖子搜索（`/api/posts`）
+
+第一层无结果时，改用帖子接口搜索兜底：
+
+```bash
+curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
+```
+
+- 响应 `data[]` 为匹配的帖子，每项的 `relationships.discussion.data.id` 为所属讨论 ID。
+- **取主题标题**：对去重后的讨论 ID 逐一调用 `GET /api/discussions/<id>`，从 `data.attributes.title` 读取主题标题。
+- **判断方式与第一层相同**：检查这些主题标题中是否有同项目的讨论。
+
+也可用页面搜索辅助核对：浏览器打开 `$FLARUM_URL/?q=<项目名>`（如 `https://forum.example.com/?q=Windmill`），所见即所得。
+
+### 判定规则
+
+- 第一层命中同项目讨论 → 已存在。
+- 第一层未命中、第二层帖子搜索取到的主题标题中存在同项目讨论 → 已存在。
+- 两层均未命中 → 未存在，继续正常发布流程。
+- 项目名过短或过于通用（如 "app"、"tool"）导致结果过多或无有效结果时，用 GitHub 完整仓库名（`<owner>/<repo>`）或项目全名重新搜索确认。
 
 ## 标签策略
 
@@ -122,6 +144,15 @@ metadata:
 | --- | --- | --- | --- |
 | 默认（开源项目） | `55, 57` | 开源项目、开源社区 | 一般开源项目 |
 | AI 项目 | `63, 86` | 人工智能、AI 项目 | AI / LLM / 机器学习相关项目 |
+
+### 标签数量限制
+
+**最终标签总数最多 3 个，2–3 个才正确**。超出时按以下优先级裁剪，保留前 3 个：
+
+1. 基础标签组（默认组或 AI 组，2 个）；
+2. 语言标签（1 个）。
+
+即 GitHub 项目最多为「基础组 2 个 + 语言 1 个 = 3 个」；未匹配到语言标签时为 2 个。任何情况下都不得把 4 个及以上标签传给 `publish.sh`。
 
 ### 标签选择规则
 
@@ -157,7 +188,7 @@ metadata:
      | Dockerfile | `docker` | 26 |
 
    - 以上对照表为已知映射；遇到未列出的语言时，从标签缓存中按名称/slug 模糊匹配，匹配不到则跳过，不追加。
-   - 最终标签组 = 基础标签组 + 语言标签（去重）。
+   - 最终标签组 = 基础标签组 + 语言标签（去重），**总数最多 3 个**（见[标签数量限制](#标签数量限制)）。
 
 3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.sh` 的第三个参数，如 `"$SKILL_PATH/scripts/publish.sh" "标题" /tmp/article.md "55,57,21"`。
 
@@ -215,6 +246,15 @@ metadata:
 - 响应 `included` 中，`relationships.firstPost.data.id` 对应的帖子含 `attributes.contentHtml`（首帖正文）；`relationships.tags.data[].id` 为标签 ID（可在 `included` 中查到标签名称）。
 - **注意**：部分站点的 `include=posts` 参数不可用，应直接请求 `GET /api/discussions/<id>` 后从 `included` 中提取。
 - 可用于将论坛已有文章作为素材整理新文章。
+
+### 搜索帖子：Search posts
+
+`GET /api/posts?filter[q]=<关键词>`
+
+- 用于查重的第二层兜底：第一层 `/api/discussions` 搜不到时，改搜帖子接口。
+- 响应 `data[]` 中每项的 `relationships.discussion.data.id` 为所属讨论 ID。
+- 取主题标题：对去重后的讨论 ID 调用 `GET /api/discussions/<id>` 读取 `data.attributes.title`，再按标题判断是否已存在同项目讨论（与第一层判断方式相同）。
+- 未认证时仅返回访客可见帖子。
 
 ### 查询标签：Get tags
 
@@ -302,5 +342,6 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 ## 约束
 
 - **发布前必须经用户确认**标题、正文与标签。
+- **标签总数最多 3 个**（2–3 个正确），超限会被论坛拒绝或截断。
 - 不得修改或删除论坛上已有的讨论（本 skill 只做创建）。
 - 不要将 token、密码写入文件、日志或提交记录。
