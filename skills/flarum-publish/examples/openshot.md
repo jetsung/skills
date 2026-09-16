@@ -26,7 +26,7 @@ OpenShot Video Editor 是一款屡获大奖、完全免费且开源的视频编�
 * 支持导入和导出多种通用格式（如 EDL、XML）
 * 基于 FFmpeg，可输出多种编码和格式的视频
 
-![OpenShot 截图](https://flarum-images.w.idev.top/2026-09-02/1788324355-159940-image.png)
+![OpenShot 截图](//flarum-images.w.idev.top/2026-09-02/1788324355-159940-image.png)
 
 ---
 

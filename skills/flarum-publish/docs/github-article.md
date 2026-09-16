@@ -13,7 +13,7 @@
 
 - <项目的主要功能与用途>
 
-![项目截图](<图片URL>)
+![项目截图](//<图床域名>/<日期>/<文件名>)
 
 ---
 
@@ -28,13 +28,27 @@
 0. **查重**：先检查论坛是否已存在该项目讨论（见 [SKILL.md 查重](../SKILL.md#查重)）——用仓库名（`<repo>`）搜索 `$FLARUM_URL/?q=<repo>`，已存在时向用户确认是否仍要整理发布。
 1. **仓库元数据**：`GET https://api.github.com/repos/<owner>/<repo>`（可设 `GITHUB_TOKEN` 避免限流），提取 `description`、`language`、`license`、`homepage`、`topics` 等。
 2. **README**：优先 `https://raw.githubusercontent.com/<owner>/<repo>/<默认分支>/README.md`（默认分支取 API 返回的 `default_branch`，可能是 `main` 或 `master`）。中国网络环境（`IS_CHINA=1`）下 raw 域名需加代理前缀 `https://filetas.asfd.cn/`。
+   - 代理也可能失败（实测出现过 `CONNECT tunnel failed, response 502`）。此时改用 Contents API 直连读取原文：
+     ```bash
+     curl -fsSL -H "Accept: application/vnd.github.raw" \
+       "https://api.github.com/repos/<owner>/<repo>/readme"
+     curl -fsSL -H "Accept: application/vnd.github.raw" \
+       "https://api.github.com/repos/<owner>/<repo>/contents/<path>?ref=<ref>"
+     ```
+   - 若仓库根目录有 README 的多语言文件（如 `README.zh-CN.md`），优先取简体中文版原文。
    - 若 README 含多语言切换链接（如 openaitx），直接取简体中文版本链接里的原文，或自行翻译英文正文。
    - HTML 片段（`<p align="center">`、`<details>` 徽章区等）剥离，只保留实质内容。
 3. **截图**：README 中引用的仓库内图片（`assets/...`、`docs/...` 等）为相对路径，需拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>` 方可外显。从 README 中提取所有候选图片（`![alt](path)` 或 HTML `<img src="path">`），拼接完整 URL 后**逐张展示给用户选择**：
-   - 用 `ask` 工具展示候选图片列表，每个选项的 `description` 中包含完整图片 URL（方便用户点击查看），`preview` 字段可选渲染图片预览。
+   - 用提问工具（如 `AskUserQuestion`）展示候选图片列表，每个选项的 `description` 中包含完整图片 URL（方便用户点击查看后自行决定选哪张）。
+   - **先展示 URL、拿到用户确认，再转存**；不要未经确认就往图床传图。
    - 仅 1 张候选图片时，仍需确认是否添加（用户可能不需要图片）。
-   - 0 张候选图片时，跳过图片行。
-   - 用户选定后，将图片以 `![<alt>](<完整URL>)` 格式插入正文的 `## 主要功能` 列表之后、`---` 分隔线之前。
+   - 0 张候选图片时，跳过图片行。README 里唯一的图若是失效链接（404）或只是徽章，正文可改用项目官网的可用截图，并在选项描述中注明来源。
+   - 用户选定后，先转存到论坛图床再写入正文：
+     ```bash
+     "$SKILL_PATH/scripts/upload_image.sh" "<选中的图片 URL 或本地文件>"
+     # 输出: <来源>	<图床URL>
+     ```
+     将返回的图床地址以 `![<alt>](<图床URL>)` 格式插入正文的 `## 主要功能` 列表之后、`---` 分隔线之前。**地址保持协议相对形式 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`。** 用户明确要求保留原始地址时才用原地址。
 4. **标签确定**：根据项目信息判断标签组（见 [SKILL.md 标签策略](../SKILL.md#标签策略)）：
    - 判断 AI 项目：`description` 或 `topics` 含 LLM/AI/机器学习/深度学习等关键词 → 使用 `[63, 86]`；否则默认 `[55, 57]`。
    - 追加语言标签：从步骤 1 获取的 `language` 字段对照 SKILL.md 语言映射表追加对应 tag ID。
@@ -45,7 +59,7 @@
 1. **标题**：`<项目名>：<总结性定位>`（如「OpenShot：开源的视频编辑软件」「Firemark：开源的图片/PDF 水印工具」）。**从 README 内容中总结提炼定位**，不要直接从 GitHub API 的 `description` 字段照搬。中文，冒号用全角，整行标题（含项目名）控制在 **20 个汉字以内**，宁短勿长。**正文第一行写 `# <标题>`**（带 `# ` 前缀的一级标题），与传给 `publish.sh` 的标题参数（去掉 `# ` 前缀）完全一致。
 2. **首段简介**：`<项目名称> 是一款……` 句式开头，1-2 句话概括项目是什么、核心亮点（跨平台、免费开源、语言/技术栈），译写自 `description` 与 README 开头，不要照抄英文。
 3. **`## 主要功能`**：以列表提炼 README 的核心能力，每条一行中文短句，按「平台/技术基础 → 核心能力 → 特色亮点」排序，一般 8-20 条；不要罗列命令行参数表。
-4. **截图**（可选）：经用户确认选定的图片，以 `![<alt>](<完整URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。无图则省略。
+4. **截图**（可选）：经用户确认选定的图片，转存图床后以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前；**地址用协议相对形式 `//host/path`，不带 `http:` / `https:`**。无图则省略。
 5. **结尾**：`---` 分隔线之后，裸 URL 形式给出开源地址（必有）与官网地址（有才写），各占一行。
 
 正文全部使用简体中文；专有名词（项目名、技术名词）保留英文原文。
@@ -73,7 +87,7 @@ Firemark 是一款完全免费且开源的图片与 PDF 水印工具，基于 Ru
 - 批量处理整个文件夹，支持递归、多线程与试运行，已处理文件自动跳过
 - 支持 TOML 配置文件与预设（preset），如 ultra-secure（高安全）与 light（轻量）两档
 
-![Firemark 水印效果对比](https://raw.githubusercontent.com/Vitruves/firemark/master/assets/img/paycheck-firemark-comparison.png)
+![Firemark 水印效果对比](//<图床域名>/<日期>/<hash>-<文件名>.png)
 
 ---
 

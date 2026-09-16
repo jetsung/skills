@@ -1,8 +1,8 @@
 ---
 name: flarum-publish
-description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛，或要求把 GitHub 项目整理成论坛文章时使用。
+description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签、将文章配图转存到论坛图床（fof/upload）；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛、把图片转存到论坛图床，或要求把 GitHub 项目整理成论坛文章时使用。
 metadata:
-  version: "1.8.0"
+  version: "1.9.0"
 ---
 
 # Flarum 文章发布
@@ -21,7 +21,7 @@ metadata:
 - [标签策略](#标签策略)
 - [API 端点](#api-端点)
 - [错误处理](#错误处理)
-- [图片选择](#图片选择)
+- [图片选择与图床转存](#图片选择与图床转存)
 - [使用脚本](#使用脚本)
 - [约束](#约束)
 
@@ -48,6 +48,20 @@ metadata:
 后续发现其他需要走代理的域名，直接在上表末尾追加一行即可（仅填域名与示例）。
 
 若访问未在清单中的域名或链接失败（如超时、连接被重置），可先按上述方式将该域名加入清单并加前缀 `https://filetas.asfd.cn` 后，重新抓取尝试。
+
+### 代理不可用时的兜底（GitHub raw）
+
+代理本身也可能失败（实测出现过 `CONNECT tunnel failed, response 502`）。抓取 GitHub 仓库内的文件（README、图片等）时，按以下顺序尝试，任一步成功即停止：
+
+1. 直连原始地址；
+2. `raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>` → 改用 GitHub Contents API，可直连：
+   ```bash
+   curl -fsSL -H "Accept: application/vnd.github.raw" \
+     "https://api.github.com/repos/<owner>/<repo>/contents/<path>?ref=<ref>"
+   ```
+3. 加代理前缀 `https://filetas.asfd.cn/<原始地址>`。
+
+`scripts/upload_image.sh` 已内置这套降级逻辑，下载图片时不必手工处理。
 
 ## 认证
 
@@ -79,7 +93,7 @@ metadata:
    - **用户提供文章/文件**：确认标题与正文。正文使用 Markdown（Flarum 首帖支持 Markdown 格式存储）。若用户提供的是文件路径，读取全文作为正文；若未提供标题，从正文提炼。
    - **用户提供 GitHub 项目链接**（如 `https://github.com/<owner>/<repo>`）：按 [docs/github-article.md](docs/github-article.md) 的工作流采集仓库信息（API 元数据 + README），套用 [examples/demo.md](examples/demo.md) 模板整理成中文文章（成品参照 [examples/openshot.md](examples/openshot.md)），**保存为临时文件（默认 `/tmp/article.md`）**，再发布。注意：标题为 `<项目名称>：<总结性定位>`，**从 README 总结提炼、20 汉字以内、不照搬 GitHub API 的 description**（见 [docs/github-article.md](docs/github-article.md) 写作要求）。**标题与正文第一行必须一致**：正文第一行写 `# <标题>`（带 `# ` 前缀的 Markdown 一级标题），发布时传给 `publish.sh` 的标题参数为去掉 `# ` 前缀的同一字符串，两者内容完全一致。
 2. **查重**：从标题提取项目名称，搜索论坛检查是否已存在该项目讨论（见[查重](#查重)）。已存在时向用户展示已有讨论并询问是否仍要发布。
-3. **确认信息**：发布前向用户展示 标题 / 正文摘要 / 目标标签 / 图片（如有），确认后再发布。这是对外可见的公开操作，必须经用户确认。图片需展示完整 URL 供用户点击查看。
+3. **确认信息**：发布前向用户展示 标题 / 正文摘要 / 目标标签 / 图片（如有），确认后再发布。这是对外可见的公开操作，必须经用户确认。图片需展示完整 URL 供用户点击查看后自行选定，**确认选图后才转存到图床**（见[图片选择与图床转存](#图片选择与图床转存)）。
 4. **确定标签**：按 [标签策略](#标签策略) 选择标签组。默认组 `[55,57]`（开源项目、开源社区），AI 项目组 `[63,86]`（人工智能、AI 项目）。GitHub 项目还需追加语言标签（见标签策略）。最终标签以逗号分隔的 ID 传给 `publish.sh`。
 5. **发布**：调用 `scripts/publish.sh`（见[使用脚本](#使用脚本)）。
 6. **验证**：脚本输出新讨论的 ID 与链接（`$FLARUM_URL/d/<id>`），向用户报告。
@@ -263,6 +277,21 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 - 响应 `data`（或 `included`）中每个标签含 `id`、`attributes.name`、`attributes.slug`、`attributes.color`、`attributes.icon` 等。
 - 未认证时仅返回访客可见的标签。
 
+### 上传图片：Upload file（fof/upload）
+
+`POST /api/fof/upload`（需要带认证头；由 `fof/upload` 插件提供）
+
+```bash
+curl -X POST "$FLARUM_URL/api/fof/upload" \
+  -H "Authorization: Token $FLARUM_TOKEN" \
+  -F "files[]=@/path/to/image.png;type=image/png"
+```
+
+- **表单字段名必须是 `files[]`**。用 `image` / `file` / `upload` 等其它名字都会返回 `400 fof-upload.no_files_made_it_to_upload`（提示「请上传小于 4096 kb 的文件」），即使文件本身完全合法。
+- 响应 `data[0].attributes`：`url`（图片地址，**协议相对形式** `//<图片域名>/<日期>/<hash>-<name>.<ext>`；论坛正文直接用它即可，不要在前面补 `http:` / `https:`）、`path`、`type`、`size`、`bbcode`、`uuid` 等。`url` 即正文应使用的地址。
+- 大小上限 4096 kb，超限拒绝。
+- 也可通过 `GET /api/fof/upload` 判断论坛是否装了这个插件：返回 405 表示路由存在（可上传），404 表示没有该插件（此时跳过转存，正文用原始地址）。
+
 ### 其他端点（参考，本 skill 不使用）
 
 - `POST /api/users`：创建用户（`attributes.username` / `email` / `password`）。
@@ -278,25 +307,36 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 | 422 | `validation_error` | 字段校验失败，`source.pointer` 指出无效字段（如 `/data/attributes/title`），`detail` 为具体原因；同一字段可能同时有多条错误 |
 | 401/403 | — | 认证失败或无权限（如无发帖权限、recaptcha 插件拦截） |
 
-## 图片选择
+## 图片选择与图床转存
 
 当文章需要配图时（尤其是 GitHub 项目），**必须由用户确认是否添加图片以及选择哪张图片**，不要自动指定。
 
+**关键顺序：先给用户看 URL，确认选图之后才转存。** 不要未经确认就把图片往论坛图床上传。
+
 ### 流程
 
-1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge）等非实质图片。
+1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge、sponsor 图标）等非实质图片。
 2. **拼接完整 URL**：相对路径拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>`。
-3. **展示并选择**：用 `ask` 工具向用户展示候选图片，每个选项须：
-   - `label`：简短描述（如「架构图」「效果对比图」）。
-   - `description`：完整图片 URL（方便用户点击查看）。
-   - `preview`：可选，渲染图片预览供直接查看。
+3. **展示候选并等待用户确认（在转存之前）**：用提问工具（如 `AskUserQuestion`）展示候选图片，每个选项须：
+   - `label`：简短描述（如「架构图」「效果对比图」「hero 图」）。
+   - `description`：**完整图片 URL**，让用户能点击过去自己查看，再决定选哪些。
    - 提供「不添加图片」选项。
-   - 多张图片时可设 `multi: true` 允许多选。
-4. **写入正文**：用户选定后，以 `![<alt>](<完整URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。正文中的图片 URL 使用原始地址（不加代理前缀）。
+   - 多张图片时可允许多选。
+   - 若某个候选地址已失效（如 404），不要塞进选项；可改用项目官网等来源的可用图片，并在选项描述里注明来源。
+4. **转存到图床**：用户选定后，用 `scripts/upload_image.sh` 把选中的图片转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出每张图的图床地址。用户明确要保留原始地址时，可跳过转存。
+5. **写入正文**：以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。**图床地址保持协议相对形式，即 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`**：
+
+   ```markdown
+   ![ECC 概览](//flarum-images.w.idev.top/2026-09-15/1789468836-466910-ecc-hero.png)
+   ```
 
 ### 注意事项
 
-- 若用户论坛有图片转存习惯（如将 GitHub 图片转存到论坛图床），提示用户先转存，正文使用转存后的 URL。
+- **正文图片地址一律使用协议相对形式**（`//<图片域名>/<日期>/<hash>-<name>.<ext>`）：不加 `http:` / `https:` 前缀，浏览器会按页面自身的协议（论坛是 https）解析。这是本站正文的既定写法——站内已有帖子的图片均为 `<img src="//flarum-images...">` 形式；写成带协议的绝对地址同样能显示，但风格不一致。
+- `raw.githubusercontent.com` 在部分网络下不可达，不适合直接作为正文图片地址。
+- 转存拿到的地址必须**回填进正文**：图片托管在图床不等于正文引用了它，漏了这一步读者看到的仍是打不开的原图地址。
+- 图片若自行下载到本地，注意工作区临时文件不持久，下载与转存应在同一次操作内完成。
+- 论坛图片有体积上限（实测 4096 kb），超限会被拒绝；`upload_image.sh` 会在上传前拦下超过 4 MB 的文件。
 
 ## 使用脚本
 
@@ -327,6 +367,27 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 
 标签缓存文件：`~/.cache/flarum_idev_tags`（原始 API JSON 响应）。
 
+### upload_image.sh — 图片转存到论坛图床
+
+把图片（本地文件或远程 URL）转存到论坛图床，拿到国内可直连的地址后写进正文。
+
+```bash
+# 单个 URL（GitHub raw 会自动降级到 api.github.com / 代理前缀）
+"$SKILL_PATH/scripts/upload_image.sh" \
+  "https://raw.githubusercontent.com/<owner>/<repo>/main/assets/hero.png"
+
+# 本地文件
+"$SKILL_PATH/scripts/upload_image.sh" ./hero.png
+
+# 多张一起转存
+"$SKILL_PATH/scripts/upload_image.sh" ./a.png ./b.png
+```
+
+- 输出：每个输入一行「`<来源>` + Tab + `<图床URL>`」，其中图床地址为**协议相对形式**（`//host/path`），可直接粘进正文；确需绝对地址时自行补 `https:`。失败的行打到 stderr，脚本以非 0 退出。
+- 依赖环境变量 `FLARUM_URL`、`FLARUM_TOKEN`（可选 `FLARUM_USER_ID`）；`IS_CHINA=1` 时启用代理前缀降级。
+- 单文件上限 4 MB，超限会在上传前报错。
+- **必须在用户确认选图之后才调用**（见[图片选择与图床转存](#图片选择与图床转存)）。
+
 ### 示例文件
 
 - [examples/demo.md](examples/demo.md)：文章模板（占位符格式）。
@@ -342,6 +403,7 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 ## 约束
 
 - **发布前必须经用户确认**标题、正文与标签。
+- **图片必须先经用户确认选图，再转存到图床**；不得未经确认就往图床传图。
 - **标签总数最多 3 个**（2–3 个正确），超限会被论坛拒绝或截断。
 - 不得修改或删除论坛上已有的讨论（本 skill 只做创建）。
 - 不要将 token、密码写入文件、日志或提交记录。
