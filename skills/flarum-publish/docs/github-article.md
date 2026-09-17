@@ -42,6 +42,12 @@
    - 用提问工具（如 `AskUserQuestion`）展示候选图片列表，每个选项的 `description` 中包含完整图片 URL（方便用户点击查看后自行决定选哪张）。
    - **先展示 URL、拿到用户确认，再转存**；不要未经确认就往图床传图。
    - 仅 1 张候选图片时，仍需确认是否添加（用户可能不需要图片）。
+   - **图片也可能是 CDN 绝对地址**：部分仓库（如 jub0t/Concat）在 README 里直接用 jsDelivr 引用配图——`<img src="https://cdn.jsdelivr.net/gh/<owner>/<repo>@<分支>/assets/xxx.png">`。这类地址本身就是完整 URL，不必拼 raw 前缀，而且国内可直连，可直接作为候选；注意收集时要同时扫描 HTML `<img src>` 而不只是 Markdown `![]()`。
+   - **README 里的图片路径可能已失效**（如 code-server 的 `./assets/screenshot-1.png` 返回 404，实际文件已挪到 `docs/assets/`）。404 时不要直接判为「无图」，改用 Contents API 探测常见目录：
+     ```bash
+     curl -s "https://api.github.com/repos/<owner>/<repo>/contents/docs/assets/<文件名>?ref=<分支>"
+     ```
+     命中后取其 `download_url`（即 raw 地址）作为候选，同时在给用户看图片时说明该图来自仓库其他目录。
    - 0 张候选图片时，跳过图片行。README 里唯一的图若是失效链接（404）或只是徽章，正文可改用项目官网的可用截图，并在选项描述中注明来源。
    - **检查大小**：用户选定后，用 `curl -sIL` 取 `content-length`（无则下载到本地临时文件用 `stat -c%s` 取字节数）。**≤1MB** 适合直接转存图床；**>1MB** 需先经 [SKILL.md 图片压缩与转存](../SKILL.md#图片压缩与转存1mb-场景) 流程压缩——尝试 `oxipng` / `rimage`，压缩后 <1MB 转存，两工具都失败则用原图 URL（不加代理前缀）。
    - 用户选定后，先转存到论坛图床再写入正文：

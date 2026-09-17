@@ -231,16 +231,25 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 
 1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge、sponsor 图标）等非实质图片。
 2. **拼接完整 URL**：相对路径拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>`。
-3. **展示候选并等待用户确认（在转存之前）**：用提问工具（如 `AskUserQuestion`）展示候选图片，每个选项须：
+3. **先在对话中输出图片链接（弹出选择框之前）**：把每个候选图片按「`<简短描述>: <完整URL>`」格式逐行输出到对话中，每行一个，如：
+
+   ```
+   架构图: <https://example.com/example.png>
+   效果对比图: <https://example.com/compare.png>
+   ```
+
+   目的是让用户能直接点击打开查看每张图片，再据此决定选择框里选哪些。**必须先完成这一步输出，再弹出选择框。**
+
+4. **展示候选并等待用户确认（在转存之前）**：用提问工具（如 `AskUserQuestion`）展示候选图片，每个选项须：
    - `label`：简短描述（如「架构图」「效果对比图」「hero 图」）。
-   - `description`：**完整图片 URL**，让用户能点击过去自己查看，再决定选哪些。
+   - `description`：**完整图片 URL**，与上一步对话中输出的对应行一致，方便再次点击查看。
    - 提供「不添加图片」选项。
    - 多张图片时可允许多选。
    - 若某个候选地址已失效（如 404），不要塞进选项；可改用项目官网等来源的可用图片，并在选项描述里注明来源。
-4. **检查大小并转存到图床**：用户选定后，先用 `curl -sIL` 检查每张图的大小（取 `content-length`，无则下载到本地临时文件用 `stat -c%s` 取字节数）：
+5. **检查大小并转存到图床**：用户选定后，先用 `curl -sIL` 检查每张图的大小（取 `content-length`，无则下载到本地临时文件用 `stat -c%s` 取字节数）：
    - **≤1MB**：直接用 `scripts/upload_image.sh` 转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出图床地址。用户明确要保留原始地址时，可跳过转存。
    - **>1MB**：不直接转存，进入 [图片压缩与转存（>1MB 场景）](#图片压缩与转存1mb-场景) 流程——用 `oxipng` / `rimage` 尝试压缩；压缩后 <1MB 则转存，两工具都压不下来（失败或仍 ≥1MB）则直接引用原图 URL（**不加代理前缀**）。
-5. **写入正文**：以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。**图床地址保持协议相对形式，即 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`**：
+6. **写入正文**：以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。**图床地址保持协议相对形式，即 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`**：
 
    ```markdown
    ![ECC 概览](//flarum-images.w.idev.top/2026-09-15/1789468836-466910-ecc-hero.png)
@@ -269,14 +278,32 @@ which rimage >/dev/null 2>&1 || curl -L fx4.cn/rimage | bash
 
 安装后验证：`oxipng --version` 与 `rimage --version` 应能正常执行。
 
+**沙箱 / 受限环境下的两个坑（实测）**：
+
+1. **PATH 里可能没有 `/usr/local/bin`**，导致 `which oxipng` 误判为未安装——工具其实早就装好了。检测时按绝对路径兜底：
+   ```bash
+   for t in oxipng rimage; do
+     p=$(command -v $t || echo "/usr/local/bin/$t")
+     [ -x "$p" ] && echo "$t -> $p"
+   done
+   ```
+   命中绝对路径后直接用绝对路径调用（`/usr/local/bin/oxipng ...`），别再跑安装脚本。
+2. **`fx4.cn` 安装脚本在本机必失败**：它解压到 `/tmp`，而 `/tmp` 只有 10 MB 的 tmpfs，还会因 `Cannot change ownership to uid 1001` 报错退出。不要反复重试安装脚本；改为手动装（解压加 `--no-same-owner`，装到 PATH 内可写目录如 `~/.local/bin`）：
+   ```bash
+   tar --no-same-owner -xzf <包>.tar.gz -C <工作区目录>
+   install -m 755 <包>/oxipng ~/.local/bin/oxipng
+   ```
+   （`/usr/bin`、`/usr/local/bin` 在沙箱里可能是只读的，写入前先 `touch` 测一下。）
+
 ### 压缩算法（两工具互相兜底）
 
 对单个 >1MB 图片，按以下流程处理（两个工具互为兜底：一个不行就换另一个，不重复尝试已失败的工具）：
 
 1. 下载原图到本地临时文件（受 [网络规则](#网络规则中国网络代理) 代理规则约束）。
 2. 依次尝试 `oxipng` 与 `rimage`（顺序不限），**任一工具满足「压缩成功 且 结果 <1MB」即采用该产物并停止尝试**：
-   - `oxipng -o max --strip safe <in> -o <out.png>`（仅处理 PNG；非 PNG 直接判定该工具不可用，换下一个）。
-   - `rimage <in> <out>`（通用格式，按格式自动压缩）。
+   - `oxipng -o max --strip safe --out <out.png> <in.png>`（仅处理 PNG；非 PNG 直接判定该工具不可用，换下一个）。注意 oxipng 10.x 的 `-o` 是优化级别、输出文件必须用 `--out`，写成 `... <in> -o <out>` 会报 usage 错误。实测：1.32 MB 的 PNG 用这条命令可压到 812 KB。
+   - `rimage png --directory <输出目录> --suffix _min <in.png>`（通用格式，需带子命令如 `png`/`webp`/`mozjpeg`；输出到 `--directory` 并加 `--suffix`，不支持「输入+输出」两个位置参数写法）。**实测它对 PNG 反而会变大**（1.35 MB → 8 MB），所以 PNG 优先用 oxipng，rimage 只作兜底。
+   - GIF / 动图两个工具都处理不了（oxipng 只吃 PNG，rimage 无 gif 子命令），会走到「两工具都失败」分支，直接引用原图 URL。
 3. **命中（某工具成功且 <1MB）**：将该产物转存到论坛图床（如 `flarum-images.w.idev.top`），正文使用协议相对地址 `//host/path`。
 4. **两工具都失败 / 结果仍 ≥1MB**：放弃压缩，直接引用原图 URL，**不加代理前缀**（即 `https://raw.githubusercontent.com/...` 原样，不套 `filetas.asfd.cn`）。
 
