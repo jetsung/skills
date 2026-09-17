@@ -2,7 +2,7 @@
 name: flarum-publish
 description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签、将文章配图转存到论坛图床（fof/upload）；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛、把图片转存到论坛图床，或要求把 GitHub 项目整理成论坛文章时使用。
 metadata:
-  version: "1.9.0"
+  version: "1.10.0"
 ---
 
 # Flarum 文章发布
@@ -22,6 +22,7 @@ metadata:
 - [API 端点](#api-端点)
 - [错误处理](#错误处理)
 - [图片选择与图床转存](#图片选择与图床转存)
+- [图片压缩与转存（>1MB 场景）](#图片压缩与转存1mb-场景)
 - [使用脚本](#使用脚本)
 - [约束](#约束)
 
@@ -208,94 +209,7 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 
 ## API 端点
 
-### 认证：获取 Access Token
-
-`POST /api/token`
-
-```json
-{
-  "identification": "Toby",
-  "password": "pass7word"
-}
-```
-
-返回 `{"token": "...", "userId": "1"}`。
-
-### 发布讨论：Create discussion
-
-`POST /api/discussions`
-
-```json
-{
-  "data": {
-    "type": "discussions",
-    "attributes": {
-      "title": "Lorem Ipsum",
-      "content": "Hello World"
-    },
-    "relationships": {
-      "tags": {
-        "data": [{ "type": "tags", "id": "1" }]
-      }
-    }
-  }
-}
-```
-
-- `attributes.title`：标题（必填）；`attributes.content`：首帖正文（必填，支持 Markdown）。
-- `relationships.tags`：可选，`data` 为标签对象数组（`{"type": "tags", "id": "<标签ID>"}`），不支持标签的论坛需整体省略。
-- 响应 `data.id` 即新讨论 ID，讨论链接为 `$FLARUM_URL/d/<id>`。
-
-### 查询讨论列表：List discussions
-
-`GET /api/discussions`
-
-- 无需认证（仅返回访客可见内容）；支持分页 `?page[offset]=20`。
-- 响应 `data[].attributes` 含 `title`、`slug`、`commentCount`、`createdAt` 等；`relationships.tags.data[].id` 为标签 ID；`included` 中含标签/用户/首帖详情（首帖 `attributes.contentHtml`）。
-
-### 读取单篇讨论：Get discussion
-
-`GET /api/discussions/<id>`
-
-- 响应 `included` 中，`relationships.firstPost.data.id` 对应的帖子含 `attributes.contentHtml`（首帖正文）；`relationships.tags.data[].id` 为标签 ID（可在 `included` 中查到标签名称）。
-- **注意**：部分站点的 `include=posts` 参数不可用，应直接请求 `GET /api/discussions/<id>` 后从 `included` 中提取。
-- 可用于将论坛已有文章作为素材整理新文章。
-
-### 搜索帖子：Search posts
-
-`GET /api/posts?filter[q]=<关键词>`
-
-- 用于查重的第二层兜底：第一层 `/api/discussions` 搜不到时，改搜帖子接口。
-- 响应 `data[]` 中每项的 `relationships.discussion.data.id` 为所属讨论 ID。
-- 取主题标题：对去重后的讨论 ID 调用 `GET /api/discussions/<id>` 读取 `data.attributes.title`，再按标题判断是否已存在同项目讨论（与第一层判断方式相同）。
-- 未认证时仅返回访客可见帖子。
-
-### 查询标签：Get tags
-
-`GET /api/tags`
-
-- 响应 `data`（或 `included`）中每个标签含 `id`、`attributes.name`、`attributes.slug`、`attributes.color`、`attributes.icon` 等。
-- 未认证时仅返回访客可见的标签。
-
-### 上传图片：Upload file（fof/upload）
-
-`POST /api/fof/upload`（需要带认证头；由 `fof/upload` 插件提供）
-
-```bash
-curl -X POST "$FLARUM_URL/api/fof/upload" \
-  -H "Authorization: Token $FLARUM_TOKEN" \
-  -F "files[]=@/path/to/image.png;type=image/png"
-```
-
-- **表单字段名必须是 `files[]`**。用 `image` / `file` / `upload` 等其它名字都会返回 `400 fof-upload.no_files_made_it_to_upload`（提示「请上传小于 4096 kb 的文件」），即使文件本身完全合法。
-- 响应 `data[0].attributes`：`url`（图片地址，**协议相对形式** `//<图片域名>/<日期>/<hash>-<name>.<ext>`；论坛正文直接用它即可，不要在前面补 `http:` / `https:`）、`path`、`type`、`size`、`bbcode`、`uuid` 等。`url` 即正文应使用的地址。
-- 大小上限 4096 kb，超限拒绝。
-- 也可通过 `GET /api/fof/upload` 判断论坛是否装了这个插件：返回 405 表示路由存在（可上传），404 表示没有该插件（此时跳过转存，正文用原始地址）。
-
-### 其他端点（参考，本 skill 不使用）
-
-- `POST /api/users`：创建用户（`attributes.username` / `email` / `password`）。
-- `POST /api/posts`：在已有讨论下回帖（`type: "posts"`，`attributes.content` + `relationships.discussion`）。
+各端点（获取 token、创建讨论、搜索、标签、fof/upload 上传）的请求示例与响应字段说明见 [references/api.md](references/api.md)。**需要构造请求、核对字段或排查响应结构时再加载该文件**；常规发布直接用脚本即可。
 
 ## 错误处理
 
@@ -323,7 +237,9 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
    - 提供「不添加图片」选项。
    - 多张图片时可允许多选。
    - 若某个候选地址已失效（如 404），不要塞进选项；可改用项目官网等来源的可用图片，并在选项描述里注明来源。
-4. **转存到图床**：用户选定后，用 `scripts/upload_image.sh` 把选中的图片转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出每张图的图床地址。用户明确要保留原始地址时，可跳过转存。
+4. **检查大小并转存到图床**：用户选定后，先用 `curl -sIL` 检查每张图的大小（取 `content-length`，无则下载到本地临时文件用 `stat -c%s` 取字节数）：
+   - **≤1MB**：直接用 `scripts/upload_image.sh` 转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出图床地址。用户明确要保留原始地址时，可跳过转存。
+   - **>1MB**：不直接转存，进入 [图片压缩与转存（>1MB 场景）](#图片压缩与转存1mb-场景) 流程——用 `oxipng` / `rimage` 尝试压缩；压缩后 <1MB 则转存，两工具都压不下来（失败或仍 ≥1MB）则直接引用原图 URL（**不加代理前缀**）。
 5. **写入正文**：以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。**图床地址保持协议相对形式，即 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`**：
 
    ```markdown
@@ -337,6 +253,34 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 - 转存拿到的地址必须**回填进正文**：图片托管在图床不等于正文引用了它，漏了这一步读者看到的仍是打不开的原图地址。
 - 图片若自行下载到本地，注意工作区临时文件不持久，下载与转存应在同一次操作内完成。
 - 论坛图片有体积上限（实测 4096 kb），超限会被拒绝；`upload_image.sh` 会在上传前拦下超过 4 MB 的文件。
+
+## 图片压缩与转存（>1MB 场景）
+
+当候选图片 >1MB 时，不直接转存，而是先用本地压缩工具尝试压到 <1MB，再转存到论坛图床；若两工具都压不下来（压缩失败或压缩后仍 ≥1MB），则回退到原图 URL（**不加代理前缀**）。
+
+### 工具安装（未安装时自动安装）
+
+运行前检查 `oxipng` 与 `rimage` 是否已安装，缺失则用下列命令安装（安装脚本由用户托管于 `fx4.cn`）：
+
+```bash
+which oxipng >/dev/null 2>&1 || curl -L fx4.cn/oxipng | bash
+which rimage >/dev/null 2>&1 || curl -L fx4.cn/rimage | bash
+```
+
+安装后验证：`oxipng --version` 与 `rimage --version` 应能正常执行。
+
+### 压缩算法（两工具互相兜底）
+
+对单个 >1MB 图片，按以下流程处理（两个工具互为兜底：一个不行就换另一个，不重复尝试已失败的工具）：
+
+1. 下载原图到本地临时文件（受 [网络规则](#网络规则中国网络代理) 代理规则约束）。
+2. 依次尝试 `oxipng` 与 `rimage`（顺序不限），**任一工具满足「压缩成功 且 结果 <1MB」即采用该产物并停止尝试**：
+   - `oxipng -o max --strip safe <in> -o <out.png>`（仅处理 PNG；非 PNG 直接判定该工具不可用，换下一个）。
+   - `rimage <in> <out>`（通用格式，按格式自动压缩）。
+3. **命中（某工具成功且 <1MB）**：将该产物转存到论坛图床（如 `flarum-images.w.idev.top`），正文使用协议相对地址 `//host/path`。
+4. **两工具都失败 / 结果仍 ≥1MB**：放弃压缩，直接引用原图 URL，**不加代理前缀**（即 `https://raw.githubusercontent.com/...` 原样，不套 `filetas.asfd.cn`）。
+
+> 兜底判定：「压缩不了」= 命令报错、不支持该格式、或进程非零退出；「压缩后还是大于 1M」= 压缩成功但字节数 ≥1048576。任一情形都立即切换到另一个工具；两个都不行才回退原图 URL。
 
 ## 使用脚本
 
