@@ -419,6 +419,8 @@ python3 scripts/sync-pi-to-qoder-cn.py
 
 共同要点：
 - opencode/dsh/omp 三工具的 apiKey 均为环境变量引用（非明文），同步时保留目标现有引用，只合并 models（保留现有 + 补 pi 缺失）；**qoder-cn 例外：apiKey 写死实值**
+- **AMD 渠道全量同步**：AMD 渠道不区分免费/付费，同步时全量写入所有模型（不从上游筛选免费模型）
+- **Sense 渠道版本族精简**：Sense 渠道只保留每个系列的最新版模型，例如 `sensenova-6.7-flash-lite` 和 `sensenova-6.8-flash-lite` 只保留 `sensenova-6.8-flash-lite`；`sensenova-u1-fast` 和 `sensenova-u1.5-fast` 只保留 `sensenova-u1.5-fast`。判断规则：同系列模型（id 含相同前缀如 `sensenova-*`）按版本号排序，只保留最高版本
 - **baseURL / kind（兼容模式，opencode 为 npm、dsh/omp 为 api、qoder-cn 为 type/protocol/authType/baseUrl）：不更新已有值**，仅当目标缺失/为空时补入——zcode 补 pi 的明文 baseURL 与映射后的 kind；opencode 补 `{env:XXX_BASE_URL}` 占位符（由 apiKey 占位符推导）；dsh/omp 补 pi 的 baseURL 与 api；qoder-cn 顶层字段（baseUrl/type/protocol/authType/displayName/model）一律不动，只合并 models 数组与更新 apiKey
 - 匹配渠道：同名优先，规范化兜底（如 `cloudflare-workers-ai`）；opencode 无 v2ex 时正确跳过
 - 写回：JSON 用 `json.dump(indent=2, ensure_ascii=False)`，YAML 用 `yaml.safe_dump(sort_keys=False, allow_unicode=True, default_flow_style=False)`；校验断言只允许 models 新增、apiKey 更新与 baseURL/kind 空值补充
@@ -501,7 +503,7 @@ pi 的模型配置文件位于 `~/.pi/agent/models.json`，结构为 `providers.
 - dsh 的 models 元素只含 `id`，且路径是 `llm-pi-ai.providers.{渠道}`，不要与 pi 的 `providers.{渠道}` 混淆。
 - zcode 的渠道 key 是 UUID（自定义）或 `builtin:xxx`（内置），`options.apiKey` 为明文，`models` 是对象 map（key=模型 id，value=含 name/limit/zcode 的对象），与 pi/omp/dsh 的数组结构不同；`kind: anthropic` 的渠道无 `/models` 端点，模型列表从配置读取。
 - qoder-cn 的渠道 key 是 `qoder-custom-{UUID}`，`apiKey` 为明文且位于渠道顶层（非 zcode 的 `options` 内），`models` 是数组、id 字段名为 `model`，`baseUrl` 是顶层小写 l 形式——与 zcode 的 `options.apiKey`/`options.baseURL`/models map、dsh 的 `baseURL` 全大写均不同；每渠道独立 provider + 独立密钥 + 独立模型（模型归属按短 id 匹配渠道，其它渠道模型迁出），`baseUrl`/`type`/`protocol`/`authType` 不动；`model`（当前选中）随同步做**版本族升级**：id 末段（`/` 后）开头连续字母为族键、首个数字串为版本号，同族存在更高版本时自动改用最新版（`agnes-2.5-flash` → `agnes-3.0-flash`）。
-- 模型筛选与显示：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道全量同步；kilo/openrouter 渠道同步到 zcode/dsh/qoder-cn 时改从**上游提取免费模型**（`scripts/fetch_free.py`，须同时满足：free 标签或价格为 0、**最近一年内更新**、**context 存在时 >100K**，剔除图像/视频类）；**opencode 渠道不同步**（上游价格数据不正确）；模型 displayName/name 统一为 **`{渠道显示名} - {模型名}`** 格式（如 `NewAPI - Sense DeepSeek Latest Flash`、`Sense - DeepSeek V4 Flash`，模型名已含渠道名则去重）。
+- 模型筛选与显示：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道全量同步；Sense 渠道需执行**版本族精简**（只保留每个系列的最新版，如 sensenova-6.8-flash-lite 保留、sensenova-6.7-flash-lite 剔除）；kilo/openrouter 渠道同步到 zcode/dsh/qoder-cn 时改从**上游提取免费模型**（`scripts/fetch_free.py`，须同时满足：free 标签或价格为 0、**最近一年内更新**、**context 存在时 >100K**，剔除图像/视频类）；**opencode 渠道不同步**（上游价格数据不正确）；模型 displayName/name 统一为 **`{渠道显示名} - {模型名}`** 格式（如 `NewAPI - Sense DeepSeek Latest Flash`、`Sense - DeepSeek V4 Flash`，模型名已含渠道名则去重）。
 - 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件。
 - 环境变量名正则须含数字（`[A-Z0-9_]+`）；bash 传参用 heredoc 避免 `\$`/`\"` 转义被吞；写回前备份、写回后对比备份断言只动了目标字段。
 - 写入明文密钥后报告**绝不回显密钥内容**，只报告长度/变化状态。
