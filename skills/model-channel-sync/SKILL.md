@@ -387,12 +387,14 @@ python3 scripts/sync-pi-to-zcode.py
 | `sync-pi-to-dsh.py` | `~/.dsh/settings.yaml` | 列表仅 `id` | 保留 `apiKeyEnv` 变量名 |
 | `sync-pi-to-omp.py` | `~/.omp/agent/models.yml` | 列表 `{id, name}` | 保留 `!echo` 占位符（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖） |
 | `sync-pi-to-qoder-cn.py` | `~/.qoder-cn/settings.json` | 数组（元素 id 字段名为 `model`，含 displayName/contextWindow/maxOutputTokens/capabilities） | **写死实值**（明文 apiKey，渠道顶层） |
+| `sync-pi-to-codebuddy.py` | `~/.codebuddy/models.json` | 扁平 models 数组（每模型独立条目，含 id/name/vendor/url/apiKey/supports*） | **变量模式** `${VAR}`（从 pi 的 `!echo -n "$VAR"` 解析 env 名，不写明文；现有条目 apiKey 一律不动） |
 
 ```bash
 python3 scripts/sync-pi-to-opencode.py
 python3 scripts/sync-pi-to-dsh.py
 python3 scripts/sync-pi-to-omp.py
 python3 scripts/sync-pi-to-qoder-cn.py
+python3 scripts/sync-pi-to-codebuddy.py
 ```
 
 **上游免费渠道（kilo / openrouter）**：
@@ -407,8 +409,17 @@ python3 scripts/sync-pi-to-qoder-cn.py
 - qoder-cn 归属判定豁免：这两个渠道的上游免费模型（含 short id）归对应渠道 provider 所有，不参与跨渠道迁出判定
 - 注意：同步脚本为**合并式（只增不删）**，上游已下架或不再满足过滤条件的模型不会从目标配置自动移除；如需清理需手动处理
 
-**qoder-cn 专属规则**：
+qoder-cn 专属规则：
 - 配置顶层为 `providers`，渠道 key 为 `qoder-custom-{UUID}`（自动创建时生成 uuid4）；渠道字段：`displayName`/`baseUrl`（顶层、**小写 l**）/`apiKey`（**明文实值**，非占位符）/`type`/`protocol`/`authType`/`model`（当前选中模型）/`models`
+
+**codebuddy 专属规则**（`sync-pi-to-codebuddy.py`，文档 https://www.codebuddy.cn/docs/cli/models）：
+- 结构与其它平台根本不同：**无渠道层级**，`models` 是扁平数组，每个模型是独立条目（`id`/`name`/`vendor`/`url`/`apiKey`/`supportsToolCall`/`supportsImages`/`supportsReasoning`/`useCustomProtocol`）
+- **展开规则**：pi 每个渠道的每个模型 → 一条 codebuddy 条目；`vendor` = 渠道显示名；`url` = 渠道 baseUrl 规范化（去尾斜杠；若已以 `/chat/completions` 结尾则原样保留，否则拼接 `/chat/completions`，文档要求 url 必须含完整路径）
+- **apiKey 变量模式**：从 pi 的 `!echo -n "$VAR"` 解析 env 名，写 `${VAR}`（如 `${SENSE_API_KEY}`、`${OPENROUTER_API_KEY}`），**不写明文**；codebuddy 在 CLI 启动时解析环境变量，变量不存在则密钥空缺
+- **现有条目 apiKey 一律不动**（用户可能已手工填明文或变量，绝不覆盖），其它字段（url/vendor/name/supports*）以 pi 为权威值；现有条目的额外字段（如 `maxInputTokens`/`maxOutputTokens`）保留
+- **同模型多渠道去重**：codebuddy 扁平数组中 `id` 必须唯一；同模型在 pi 多渠道重复出现时按渠道优先级（sense/amd 最高，openrouter/kilo 最低）只保留一条
+- **手工条目原样保留**（pi 中无对应的条目不删，只增不删）
+- 能力字段：`supportsImages` = pi 模型 input 含 `image` 或 id 名含 vision/vl；`supportsReasoning` = pi 模型 `reasoning` 为 true；`supportsToolCall` 默认 true；`useCustomProtocol` 默认 false
 - `models` 是**数组**，元素 id 字段名为 `model`（非 pi/dsh 的 `id`、非 zcode 的 map key），含 `displayName`/`contextWindow`/`maxOutputTokens`/`capabilities`
 - **渠道独立**：每渠道独立 provider + 独立密钥 + 独立模型；baseUrl 强绑定匹配优先，无匹配自动创建，无模型渠道跳过；模型归属按短 id 匹配渠道，其它渠道模型迁出（各自渠道的 provider 接管）
 - **展开**：每供应商的模型全部补入 models 数组；**模型筛选**：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道**全量同步**；**模型 displayName 统一为 `{渠道显示名} - {模型名}` 格式**（如 `NewAPI - Sense DeepSeek Latest Flash`、`Sense - DeepSeek V4 Flash`；模型名已以渠道名开头则去重，如 amd 的 `AMD DeepSeek V4 Flash` → `AMD - DeepSeek V4 Flash`）
@@ -418,7 +429,7 @@ python3 scripts/sync-pi-to-qoder-cn.py
 - **默认模型版本族规则（`model` 字段）**：同族（同一产品的不同版本号）模型存在更高版本时，`model` 自动取**同族最高版本**——如渠道 models 含 `agnes-2.0-flash`/`agnes-2.5-flash`/`agnes-3.0-flash` 而 `model` 为 `agnes-2.5-flash` 时，应升级为 `agnes-3.0-flash`。族键提取：模型 id 取**最后一个 `/` 后的段**（无 `/` 取全段）小写后提取**开头连续字母**（`^[a-z]+`，提取不到用整段，如 `agnes-2.5-flash` → `agnes`、`qwen3.8-27b` → `qwen`）；版本号 = 该段**首个数字串**（`2.5` → `(2,5)`，无数字 → 空元组视为最低）。同版本或均无版本号一律不动（幂等）；`model` 为空时取首个模型同族的最高版本
 
 共同要点：
-- opencode/dsh/omp 三工具的 apiKey 均为环境变量引用（非明文），同步时保留目标现有引用，只合并 models（保留现有 + 补 pi 缺失）；**qoder-cn 例外：apiKey 写死实值**
+- opencode/dsh/omp 三工具的 apiKey 均为环境变量引用（非明文），同步时保留目标现有引用，只合并 models（保留现有 + 补 pi 缺失）；**qoder-cn 例外：apiKey 写死实值；codebuddy 例外：apiKey 用 `${VAR}` 变量模式（从 pi 的 `!echo` 解析 env 名，不写明文，现有条目密钥一律不动）**
 - **AMD 渠道全量同步**：AMD 渠道不区分免费/付费，同步时全量写入所有模型（不从上游筛选免费模型）
 - **Sense 渠道版本族精简**：Sense 渠道只保留每个系列的最新版模型，例如 `sensenova-6.7-flash-lite` 和 `sensenova-6.8-flash-lite` 只保留 `sensenova-6.8-flash-lite`；`sensenova-u1-fast` 和 `sensenova-u1.5-fast` 只保留 `sensenova-u1.5-fast`。判断规则：同系列模型（id 含相同前缀如 `sensenova-*`）按版本号排序，只保留最高版本
 - **baseURL / kind（兼容模式，opencode 为 npm、dsh/omp 为 api、qoder-cn 为 type/protocol/authType/baseUrl）：不更新已有值**，仅当目标缺失/为空时补入——zcode 补 pi 的明文 baseURL 与映射后的 kind；opencode 补 `{env:XXX_BASE_URL}` 占位符（由 apiKey 占位符推导）；dsh/omp 补 pi 的 baseURL 与 api；qoder-cn 顶层字段（baseUrl/type/protocol/authType/displayName/model）一律不动，只合并 models 数组与更新 apiKey
