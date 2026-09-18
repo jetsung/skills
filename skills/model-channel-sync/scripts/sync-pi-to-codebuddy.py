@@ -65,6 +65,22 @@ def make_url(baseUrl):
     return u + '/chat/completions'
 
 
+def build_name(vendor, model_name, model_id):
+    """codebuddy name 统一为 {vendor} - {模型名} 格式。
+    例：vendor=OpenRouter, model_name=Inkling Small (Free) → "OpenRouter - Inkling Small (Free)"
+    去重：pi 的模型 name 本身已带渠道前缀时（如 "AMD DeepSeek V4 Flash"、"InferX Devstral 2 123B..."），
+    去掉模型名中的 vendor 前缀后再拼接，避免 "AMD - AMD DeepSeek..." 式重复。"""
+    if not vendor or not model_name:
+        return model_name
+    v = re.sub(r'\s+', ' ', vendor).strip()
+    m = model_name
+    # 模型名已以 vendor 开头（忽略大小写）→ 去掉该前缀，避免重复
+    m_stripped = re.sub(r'^' + re.escape(v) + r'[\s\-]*', '', m, flags=re.I).strip()
+    if m_stripped and m_stripped != m:
+        m = m_stripped
+    return f"{v} - {m}" if v else m
+
+
 def env_name_of(apiKey):
     """pi 的 !echo -n "$VAR" → VAR；其它形式返回 None。"""
     if not apiKey:
@@ -119,7 +135,8 @@ for pname, pdata in pi['providers'].items():
     for m in items:
         mid = m['id']
         seen.add(norm(mid))
-        name = m.get('name', mid)
+        raw_name = m.get('name') or m['id']
+        name = build_name(vendor, raw_name, mid)
         img = ('image' in m.get('input', [])) or bool(re.search(r'vision|/vl', mid, re.I))
         reasoning = bool(m.get('reasoning'))
         entry = {

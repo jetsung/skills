@@ -414,6 +414,7 @@ qoder-cn 专属规则：
 
 **codebuddy 专属规则**（`sync-pi-to-codebuddy.py`，文档 https://www.codebuddy.cn/docs/cli/models）：
 - 结构与其它平台根本不同：**无渠道层级**，`models` 是扁平数组，每个模型是独立条目（`id`/`name`/`vendor`/`url`/`apiKey`/`supportsToolCall`/`supportsImages`/`supportsReasoning`/`useCustomProtocol`）
+- **name 格式**：统一为 **`{vendor} - {模型名}`**（如 `Sense - DeepSeek V4 Flash`、`OpenRouter - Inkling Small (Free)`）；pi 模型 name 本身已带渠道前缀时先去掉该前缀再拼接，避免 `AMD - AMD DeepSeek...` 式重复（正则 `^{vendor}[\s\-]*` 忽略大小写匹配后剔除）
 - **展开规则**：pi 每个渠道的每个模型 → 一条 codebuddy 条目；`vendor` = 渠道显示名；`url` = 渠道 baseUrl 规范化（去尾斜杠；若已以 `/chat/completions` 结尾则原样保留，否则拼接 `/chat/completions`，文档要求 url 必须含完整路径）
 - **apiKey 变量模式**：从 pi 的 `!echo -n "$VAR"` 解析 env 名，写 `${VAR}`（如 `${SENSE_API_KEY}`、`${OPENROUTER_API_KEY}`），**不写明文**；codebuddy 在 CLI 启动时解析环境变量，变量不存在则密钥空缺
 - **现有条目 apiKey 一律不动**（用户可能已手工填明文或变量，绝不覆盖），其它字段（url/vendor/name/supports*）以 pi 为权威值；现有条目的额外字段（如 `maxInputTokens`/`maxOutputTokens`）保留
