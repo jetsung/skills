@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pi → codebuddy 全量同步（展开式：pi 渠道×模型 → codebuddy 逐模型条目，apiKey 变量模式）。
+"""pi → codebuddy 全量同步（展开式：pi 渠道×模型 → codebuddy 逐模型条目，apiKey 明文实值）。
 
 用法:
     python3 scripts/sync-pi-to-codebuddy.py
@@ -12,10 +12,10 @@ codebuddy 与 zcode/dsh/omp 等平台的结构根本不同：
 
 规则：
 - 展开：pi 每个渠道的每个模型 → 一条 codebuddy 条目；vendor = 渠道显示名；
-  url = 渠道 baseUrl 规范化（见 url 规则）；apiKey = 变量模式 "${VAR}"（由 pi 的
-  !echo -n "$VAR" 解析 env 名，不写明文）
-- 匹配现有条目：先精确 id，再 url+id，再规范化 id；已有条目保留其 apiKey（用户可能已手工填
-  明文或变量，绝不覆盖），其它字段以 pi 为权威值（url/vendor/name/supports*）
+  url = 渠道 baseUrl 规范化（见 url 规则）；apiKey = **写死明文实值**（由 pi 的
+  !echo -n "$VAR" 解析环境变量名后取其实值，与 qoder 一致；env 未设置则写空并在报告注明）
+- 匹配现有条目：先精确 id，再 url+id，再规范化 id；已有条目若为 ${VAR} 变量引用则一并
+  转换为明文实值（同一 env 名解析），已是明文的保留不动；其它字段以 pi 为权威值（url/vendor/name/supports*）
 - 同模型多渠道去重：codebuddy 扁平数组中 id 必须唯一；同模型在 pi 多渠道重复时按渠道
   优先级（PRIORITY，sense/amd 最高，openrouter/kilo 最低）只保留一条，避免重复
 - 手工条目（pi 无对应）原样保留，只增不删
@@ -91,9 +91,22 @@ def env_name_of(apiKey):
     return None
 
 
-def is_plain(apiKey):
-    """是否已是变量模式（${VAR}）或空（需补）。"""
-    return bool(re.fullmatch(r'\$\{[A-Z0-9_]+\}', (apiKey or '').strip()))
+def env_value_of(apiKey):
+    """pi 的 !echo -n "$VAR" → 环境变量实值；无法解析或未设置返回 None。"""
+    name = env_name_of(apiKey)
+    if name is None:
+        return None
+    return os.environ.get(name)
+
+
+def resolve_existing_key(key, env):
+    """现有条目 apiKey 规范化为明文实值：${VAR} 变量引用解析为实值；明文原样保留。
+    返回 (value, converted)。VAR 与当前渠道 env 名不同条目（用户自定义）按条目内变量名解析。"""
+    k = (key or '').strip()
+    m = re.fullmatch(r'\$\{([A-Z0-9_]+)\}', k)
+    if m:
+        return os.environ.get(m.group(1), ''), True  # 变量引用 → 明文实值（未设置则为空）
+    return key, False  # 已是明文或空，保留
 
 
 stamp = datetime.date.today().strftime('%Y%m%d')
@@ -121,6 +134,7 @@ for pname, pdata in pi['providers'].items():
         out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
         continue
     env = env_name_of(pdata.get('apiKey'))
+    env_val = env_value_of(pdata.get('apiKey'))
     url = make_url(pdata.get('baseUrl'))
     vendor = vendor_of(pname)
     # 模型源：kilo/openrouter 从上游提取免费模型，其它渠道用 pi models
@@ -144,7 +158,7 @@ for pname, pdata in pi['providers'].items():
             'name': name,
             'vendor': vendor,
             'url': url,
-            'apiKey': f'${{{env}}}' if env else '',
+            'apiKey': env_val or '',
             'supportsToolCall': True,
             'supportsImages': img,
             'supportsReasoning': reasoning,
@@ -153,8 +167,10 @@ for pname, pdata in pi['providers'].items():
         # 匹配现有条目（先精确 id，再 url+id，再规范化 id）
         existing = by_id.get(mid) or by_url_id.get((url, mid)) or by_norm_id.get(norm(mid))
         if existing:
-            # 现有条目保留原文（含自定义 id 变体，如 qwen38-flash-next），只同步 pi 权威字段
-            entry['apiKey'] = existing.get('apiKey', entry['apiKey'])
+            # 现有条目（含自定义 id 变体，如 qwen38-flash-next），只同步 pi 权威字段
+            old_key = existing.get('apiKey', '')
+            new_key, converted = resolve_existing_key(old_key, env)
+            entry['apiKey'] = new_key
             # 现有条目的额外字段（如 maxInputTokens/maxOutputTokens、自定义 id）保留
             for k, v in existing.items():
                 if k not in entry:
@@ -169,14 +185,15 @@ for pname, pdata in pi['providers'].items():
             if cur is None or pri < cur[0]:
                 best[norm(mid)] = (pri, new_entry)
             kept += 1
-            status = f"保留现有(密钥不动，id: {existing['id']})" if existing.get('id') != mid else '保留现有(密钥不动)'
+            kstat = '密钥 ${VAR}→明文' if converted else '密钥明文保留'
+            status = f"保留现有({kstat}，id: {existing['id']})" if existing.get('id') != mid else f'保留现有({kstat})'
         else:
             pri = PRIORITY.get(pname, 99)
             cur = best.get(norm(mid))
             if cur is None or pri < cur[0]:
                 best[norm(mid)] = (pri, entry)
             added += 1
-            status = f'新增(变量模式 ${{{env}}})' if env else '新增(无 env, 密钥空缺)'
+            status = '新增(明文实值)' if env_val else '新增(无 env, 密钥空缺)'
         out.append(f'{pname}/{mid}: {status}')
 
 new_models = [e for _, e in sorted(best.values(), key=lambda x: (x[0], norm(x[1]['id'])))]
@@ -206,13 +223,16 @@ new_ids = {m.get('id') for m in cb['models']}
 new_norms = {norm(x) for x in new_ids}
 removed = {x for x in bak_ids - new_ids if norm(x) not in new_norms}
 assert not removed, f'断言失败：删除了现有条目 {removed}（同步只增不删）'
-# 现有条目 apiKey 必须原样保留
+# 现有条目 apiKey 允许 ${VAR}→明文实值转换；已是明文的不得改动
 bak_key = {m['id']: m.get('apiKey', '') for m in bak.get('models', [])}
 for m in new_models:
     if m['id'] in bak_key:
-        assert m.get('apiKey', '') == bak_key[m['id']], f"断言失败：现有条目 {m['id']} 的 apiKey 被改动"
+        b = (bak_key[m['id']] or '').strip()
+        if re.fullmatch(r'\$\{[A-Z0-9_]+\}', b):
+            continue  # 变量引用已被转换为明文实值，允许
+        assert m.get('apiKey', '') == bak_key[m['id']], f"断言失败：现有明文条目 {m['id']} 的 apiKey 被改动"
 shutil.move(tmp, CB_PATH)
 json.load(open(CB_PATH))  # JSON 格式校验
-print(f'校验通过：新增 {added} / 保留 {kept}（apiKey 一律不动）')
+print(f'校验通过：新增 {added} / 保留 {kept}（apiKey 统一明文实值；${{VAR}} 条目已转换）')
 for line in out:
     print(line)
