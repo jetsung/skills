@@ -207,7 +207,27 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
         prov['models'] = kept
         if migrated:
             out.append(f'{pname}: 迁出 {len(migrated)} 个模型 {migrated}')
-        # 去重（按 model id，保留首个；历史误加前缀/重复条目在此收敛）
+
+        # 模型 id 规范化：以 pi 权威 id 为准（短 id → pi 原始 id 映射）。
+        # pi id 无前缀时还原被擅自添加的前缀；pi id 本身带前缀（如 poolside 的 poolside/laguna-xs-2.1）时补齐裸 id，
+        # 避免误删前缀后追加循环按 pi 原始 id 查不到 existing、每次执行重复新增。
+        # 仅当该短 id 在本渠道唯一对应一个 pi 模型时才映射（避免歧义）。
+        short_count = {}
+        for i in items:
+            s = short_id(i['id'])
+            short_count[s] = short_count.get(s, 0) + 1
+        pi_by_short = {short_id(i['id']): i['id'] for i in items if short_count[short_id(i['id'])] == 1}
+
+        def canon_id(mid):
+            return pi_by_short.get(short_id(mid), mid)
+
+        for mm in prov['models']:
+            mm['model'] = canon_id(mm['model'])
+        # 当前选中模型同样规范化
+        if prov.get('model'):
+            prov['model'] = canon_id(prov['model'])
+
+        # 去重（按 model id，保留首个；规范化后产生的重复条目在此收敛，必须位于规范化之后）
         seen, uniq = set(), []
         for mm in prov['models']:
             if mm['model'] in seen:
@@ -217,19 +237,6 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
         if len(uniq) != len(prov['models']):
             out.append(f'{pname}: 去重 {len(prov["models"]) - len(uniq)} 个重复模型')
         prov['models'] = uniq
-
-        # 模型 id 规范化：去掉本渠道擅自添加的前缀（pi 原有 id 无前缀的还原；本身带前缀的如 newapi 的 amd/... 不动）
-        for mm in prov['models']:
-            mid = mm['model']
-            if mid.startswith(pname + '/'):
-                short = mid[len(pname) + 1:]
-                if short.lower() in channel_ids.get(pname, ()):  # 短 id 索引为小写，比较时 lower
-                    mm['model'] = short
-        # 当前选中模型同样规范化
-        if prov.get('model', '').startswith(pname + '/'):
-            short = prov['model'][len(pname) + 1:]
-            if short.lower() in channel_ids.get(pname, ()):
-                prov['model'] = short
 
         # 补缺失的目标模型 + 规范现有目标模型的 displayName（渠道前缀格式，幂等）
         existing = {mm['model'] for mm in prov['models']}
