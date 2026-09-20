@@ -2,9 +2,9 @@
 name: model-channel-sync
 description: >-
   管理 AI 模型渠道（provider）配置：①提取真正可用的免费/零价模型（抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论）；
-  ②以 pi 等平台配置为基准，同步/更新渠道、模型、APIKEY 到多个 agent 工具（pi、zcode、dsh、omp、opencode、qoder、codebuddy 等）的配置文件。
+  ②以 pi 等平台配置为基准，同步/更新渠道、模型、APIKEY 到多个 agent 工具（pi、zcode、dsh、omp、opencode、qoder、codebuddy、dbx 等）的配置文件。
   凡用户提到"获取/提取/列出 XX 渠道免费模型"、"从价格判断免费模型"、"查价格为零的模型"、"有哪些免费模型可用"、
-  "给 XX 渠道加免费模型"、"这个免费模型能用吗/测试一下"、"把模型更新到 pi/omp/opencode/dsh/zcode/qoder/codebuddy"、
+  "给 XX 渠道加免费模型"、"这个免费模型能用吗/测试一下"、"把模型更新到 pi/omp/opencode/dsh/zcode/qoder/codebuddy/dbx"、
   "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"时，都应使用此技能。
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
@@ -68,6 +68,7 @@ compatibility: Requires curl, python3 (with PyYAML), and network access to provi
 | zcode | `~/.zcode/v2/provider_config.json` | `references/zcode.md` |
 | qoder | `~/.qoder/settings.json`（国外版）与 `~/.qoder-cn/settings.json`（国内版） | `references/qoder.md` |
 | codebuddy | `~/.codebuddy/models.json` | `references/codebuddy.md` |
+| dbx | `dbx.db`（SQLite）的 `ai_configs` 表，数据目录见 `references/dbx.md` | `references/dbx.md` |
 | 其他 | 用户提供路径与结构 | 遵循该工具现有格式 |
 
 > 默认查询/提取只需渠道+筛选方式，写入配置时才确认目标工具。
@@ -236,6 +237,7 @@ done
 | zcode | `references/zcode.md` | 规则式（`personalModelIds`/`modelOrder` + `providerModelRules`） | **写死明文实值**（不支持 env 引用） |
 | qoder | `references/qoder.md` | `providers.{qoder-custom-{UUID}}.models` 数组（id 字段名为 `model`） | **写死明文实值**（渠道顶层） |
 | codebuddy | `references/codebuddy.md` | 扁平 models 数组（无渠道层级，每模型独立条目） | **写死明文实值**（现有 `${VAR}` 条目一并转换） |
+| dbx | `references/dbx.md` | 每渠道一条 `ai_configs` 记录（name=渠道显示名；模型列表在 `config_json.models` 字符串数组） | **写死明文实值**（写入 `config_json.apiKey`） |
 
 **共同规则：**
 - 只写**用户级（全局）**配置，**禁止修改项目级/工作区内的配置文件**（pi/omp/opencode/dsh/zcode/qoder/codebuddy 全部适用）
@@ -254,6 +256,7 @@ python3 scripts/sync-pi-to-omp.py
 python3 scripts/sync-pi-to-zcode.py
 python3 scripts/sync-pi-to-qoder.py
 python3 scripts/sync-pi-to-codebuddy.py
+python3 scripts/sync-pi-to-dbx.py          # 写入 DBX ai_configs 表；加 --dry-run 只打印计划不写库
 ```
 
 **上游免费渠道（kilo / openrouter）**：这两个渠道同步到 **zcode / dsh / qoder** 时**不走 pi models 基准**，改由 `scripts/fetch_free.py` 从上游 `GET {baseUrl}/models` 提取**免费模型**，须同时满足：
@@ -298,4 +301,5 @@ python3 scripts/sync-pi-to-codebuddy.py
 - 环境变量名正则须含数字（`[A-Z0-9_]+`）；长脚本用 heredoc/独立脚本文件传给 python3，**不要用 bash 双引号 `-c "..."`**（会吞掉 `\$`/`\"` 转义导致正则失效）。
 - 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件；写回前备份、写回后对比备份断言只动了目标字段。
 - 写入明文密钥后报告**绝不回显密钥内容**，只报告长度/变化状态。
-- 写入明文密钥的配置文件（zcode/qoder/codebuddy）切勿提交到版本库。
+- 写入明文密钥的配置文件（zcode/qoder/codebuddy/dbx）切勿提交到版本库。
+- **dbx 是 SQLite 数据库而非配置文件**：写库前先退出 DBX 应用（避免写锁与运行时覆盖）；写库前自动备份 `dbx.db.bak-YYYYMMDD`；数据目录定位（`DBX_DATA_DIR` 或平台默认路径）见 `references/dbx.md`；`is_default` 一律不改动，默认配置由用户在 DBX 设置中手动指定。
