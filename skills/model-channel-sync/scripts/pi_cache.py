@@ -31,6 +31,22 @@ import channel_check
 PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 CACHE_PATH = os.path.expanduser('~/.cache/model-channel-sync/pi-models.json')
 
+# 中转站 vendor 名单（不区分大小写）：pi 模型条目 vendor 字段命中（或渠道 key 命中，兜底）时，
+# 该渠道按 no_models_api 方式处理——/models 可读但模型列表与 pi 不一一对应（聚合/改名），
+# 同步时直接以 pi 写死的模型列表为准（不做实时失效过滤），参数值仍从缓存原装数据取
+FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia')
+
+
+def _is_relay(pname, pdata):
+    """中转站渠道判定：模型条目 vendor 值（不区分大小写）或渠道 key 命中 FORCE_NO_MODEL_FILTER。"""
+    keys = {v.strip().lower() for v in FORCE_NO_MODEL_FILTER}
+    if pname.lower() in keys:
+        return True
+    for m in pdata.get('models', []):
+        if isinstance(m, dict) and (m.get('vendor') or '').strip().lower() in keys:
+            return True
+    return False
+
 
 def load():
     """返回缓存数据：{'providers', 'models_api', 'no_models_api'}。缓存有效时读缓存，否则重新提取（含渠道检查）。"""
@@ -76,10 +92,11 @@ def _extract():
             unavailable[pname] = r['reason']  # 渠道不通 → 不入缓存
             continue
         ids = r.get('model_ids') or []
-        if ids:
+        if ids and not _is_relay(pname, pdata):
             models_api[pname] = ids      # /models 可读 → 记录实时模型列表
         else:
-            no_models_api.append(pname)  # 无 /models 接口 → 同步时以 pi 写死列表为准
+            # 无 /models 接口，或中转站渠道（vendor 命中 FORCE_NO_MODEL_FILTER）→ 以 pi 写死列表为准
+            no_models_api.append(pname)
         providers[pname] = pdata         # 原装数据（不裁剪字段）
     return {'providers': providers, 'models_api': models_api,
             'no_models_api': no_models_api, 'unavailable': unavailable}

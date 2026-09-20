@@ -87,6 +87,7 @@ compatibility: Requires curl, python3 (with PyYAML), and network access to provi
   - **渠道不通**（鉴权失败/连接失败/响应异常）→ 该渠道**不写入缓存**；同步脚本从缓存取数时自然跳过此渠道，不创建 provider、不写密钥、不合并模型
   - **可用且 /models 返回模型列表** → 原装数据入缓存，并记入 `models_api[渠道] = [实时模型 id 列表]`
   - **可用但无 /models 接口**（HTTP 405、端点不返回 data 列表等）→ 记入 `no_models_api` 列表；同步时**直接以 pi 写死的模型列表为准**，不做实时过滤
+  - **中转站渠道**（`pi_cache.py` 的 `FORCE_NO_MODEL_FILTER`，当前为 openrouter、nvidia）：判定依据是 pi 模型条目的 **`vendor` 字段值（不区分大小写）** 命中名单（渠道 key 命中也兜底生效），如某渠道模型的 `vendor` 为 `Openrouter` 即视为中转站。此类渠道 `/models` 可读但模型列表与 pi 不一一对应（聚合/改名），**按 no_models_api 方式处理**——同步时直接以 pi 写死的模型列表为准（不做失效过滤），**参数值（contextWindow/maxTokens/input 等）仍从缓存原装数据取**
 - **模型失效过滤**：同步时 `/models` 可读的渠道只添加实时列表中仍存在的模型——pi 有但实时缓存中已不存在的模型**不添加**（`pi_cache.filter_models`，剔除的在报告中注明）
 - **数据权威顺序**：渠道与模型**以 pi 为准**（哪些渠道、哪些模型），但**数据内容以缓存为准**（缓存是检查后的快照：不可用渠道已被剔除、失效模型已被标记）
 - **原装数据**：可用渠道的 providers 段原样保存（含 contextWindow/maxTokens/input/cost 等，不裁剪），支持参数的平台直接取用
