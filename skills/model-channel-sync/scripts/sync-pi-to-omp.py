@@ -10,10 +10,13 @@ models（YAML 列表，元素 {id, name}）。pi 条目提供 contextWindow/maxT
 新增条目一并写入，现有条目不一致即同步更新（来源为权威值）。
 幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增与限制字段同步；密钥不回显。
 """
-import json, re, os, shutil, datetime
+import json, re, os, shutil, datetime, sys
 import yaml
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
+
 OMP_PATH = os.path.expanduser('~/.omp/agent/models.yml')
 
 
@@ -23,7 +26,7 @@ def norm(s):
 
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(OMP_PATH, OMP_PATH + '.bak-' + stamp)
-pi = json.load(open(PI_PATH))
+pi = pi_cache.load()
 omp = yaml.safe_load(open(OMP_PATH))
 providers = omp['providers']
 
@@ -49,7 +52,11 @@ for pname, pdata in pi['providers'].items():
     added = []
     limupd = []
     srclim = {}
-    for item in pdata.get('models', []):
+    # 模型失效过滤：/models 可读渠道剔除实时列表中已不存在的模型（no_models_api 渠道以 pi 列表为准）
+    items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+    if dropped:
+        out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+    for item in items:
         mid = item['id']
         lim = {k: item[k] for k in ('contextWindow', 'maxTokens') if item.get(k)}
         if lim:

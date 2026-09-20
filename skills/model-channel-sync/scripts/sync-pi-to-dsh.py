@@ -8,11 +8,14 @@ dsh 的 apiKeyEnv 为环境变量名，保留不动；只同步 models
 （YAML 列表，元素仅 {id}，遵循 dsh 原有格式）。幂等可重复执行；
 自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增；密钥不回显。
 """
-import json, re, os, shutil, datetime
+import json, re, os, shutil, datetime, sys
 import yaml
+
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
 import fetch_free
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 DSH_PATH = os.path.expanduser('~/.dsh/settings.yaml')
 ALIAS = {'cloudflare-workers-ai': 'cloudflare-workers-ai'}  # dsh 有同名渠道，保留可扩展
 # kilo/openrouter 渠道不走 pi models 基准，改从上游 API 提取免费模型（含价格 0，剔除图像/视频类）；
@@ -27,7 +30,7 @@ def norm(s):
 
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(DSH_PATH, DSH_PATH + '.bak-' + stamp)
-pi = json.load(open(PI_PATH))
+pi = pi_cache.load()
 dsh = yaml.safe_load(open(DSH_PATH))
 providers = dsh['llm-pi-ai']['providers']
 
@@ -54,7 +57,9 @@ for pname, pdata in pi['providers'].items():
             items = pdata.get('models', [])
             out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
     else:
-        items = pdata.get('models', [])
+        items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+        if dropped:
+            out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
     if not prov.get('baseURL'):  # 规则：不更新已有值，仅空值补充
         prov['baseURL'] = pdata.get('baseUrl', '')
         out.append(f'{pname}: baseURL 空值补充')

@@ -4,7 +4,7 @@
 用法:
     python3 scripts/sync-pi-to-zcode.py
 
-按需修改下方 PI_PATH / ZC_PATH / ALIAS。
+按需修改下方 ZC_PATH / ALIAS。
 目标配置: ~/.zcode/v2/provider_config.json（schemaVersion 1 规则式）:
 - 渠道: config.providerConfigRules.providerRules[] = {providerId, providerName, config}
   config 字段集合固定: group("standard-personal") / access{type,apiKey} / api{type,baseUrl} /
@@ -21,11 +21,14 @@
 - 无对应渠道时自动创建（字段集合与现有条目一致）
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显。
 """
-import json, re, os, shutil, datetime
+import json, re, os, shutil, datetime, sys
 from urllib.parse import urlparse
+
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
 import fetch_free
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 ZC_PATH = os.path.expanduser('~/.zcode/v2/provider_config.json')
 ALIAS = {'cloudflare-workers-ai': 'CloudFlare AI'}  # 规范化后不匹配的渠道手动映射
 API_MAP = {'openai-completions': 'openai-chat-completions', 'anthropic': 'anthropic-messages'}
@@ -93,7 +96,7 @@ def make_model_rule(mid, pid):
 
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(ZC_PATH, ZC_PATH + '.bak-' + stamp)
-pi = json.load(open(PI_PATH))
+pi = pi_cache.load()
 zc = json.load(open(ZC_PATH))
 cfg = zc['config']
 rules = cfg['providerConfigRules']['providerRules']
@@ -108,7 +111,7 @@ for pname, pdata in pi['providers'].items():
     if pname in SKIP_CHANNELS:
         out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
         continue
-    # 模型源：kilo/openrouter 从上游提取免费模型，其他渠道用 pi models
+        # 模型源：kilo/openrouter 从上游提取免费模型，其他渠道用 pi models
     if pname in UPSTREAM_FREE:
         try:
             items = fetch_free.fetch_free_models(pname)
@@ -116,7 +119,9 @@ for pname, pdata in pi['providers'].items():
             items = pdata.get('models', [])
             out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
     else:
-        items = pdata.get('models', [])
+        items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+        if dropped:
+            out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
     if not items:
         out.append(f'跳过 {pname}: 无目标模型')
         continue

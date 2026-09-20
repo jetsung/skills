@@ -10,9 +10,12 @@ pi 条目提供 contextWindow/maxTokens 限制时，新增条目写入 `limit.co
 现有条目不一致即同步更新（来源为权威值）。
 幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增与限制字段同步；密钥不回显。
 """
-import json, re, os, shutil, datetime
+import json, re, os, shutil, datetime, sys
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
+
 OC_PATH = os.path.expanduser('~/.config/opencode/opencode.json')
 ALIAS = {'cloudflare-workers-ai': 'cloudflare-workers-ai'}  # 与 pi 同名，保留可扩展
 
@@ -23,7 +26,7 @@ def norm(s):
 
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(OC_PATH, OC_PATH + '.bak-' + stamp)
-pi = json.load(open(PI_PATH))
+pi = pi_cache.load()
 oc = json.load(open(OC_PATH))
 providers = oc['provider']
 
@@ -51,7 +54,11 @@ for pname, pdata in pi['providers'].items():
     added = []
     limupd = []
     srclim = {}
-    for item in pdata.get('models', []):
+    # 模型失效过滤：/models 可读渠道剔除实时列表中已不存在的模型（no_models_api 渠道以 pi 列表为准）
+    items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+    if dropped:
+        out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+    for item in items:
         mid = item['id']
         lim = {}
         if item.get('contextWindow'):

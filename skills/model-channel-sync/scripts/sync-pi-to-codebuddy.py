@@ -4,7 +4,7 @@
 用法:
     python3 scripts/sync-pi-to-codebuddy.py
 
-按需修改下方 PI_PATH / CB_PATH。
+按需修改下方 CB_PATH。
 codebuddy 与 zcode/dsh/omp 等平台的结构根本不同：
 - pi 是「渠道(provider) 下挂 models 数组，共享一次 baseUrl/apiKey」；
 - codebuddy 是「models 扁平数组，每个条目都是一个独立模型」，自带 id/name/vendor/url/apiKey
@@ -27,9 +27,13 @@ codebuddy 与 zcode/dsh/omp 等平台的结构根本不同：
 - useCustomProtocol：默认 false
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显（只报告变量名/长度）。
 """
-import json, re, os, shutil, datetime, fetch_free
+import json, re, os, shutil, datetime, sys
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
+import fetch_free
+
 CB_PATH = os.path.expanduser('~/.codebuddy/models.json')
 # kilo/openrouter 渠道不走 pi models 基准，改从上游 API 提取免费模型（与其它平台一致）
 UPSTREAM_FREE = ('kilo', 'openrouter')
@@ -113,7 +117,7 @@ stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(CB_PATH, CB_PATH + '.bak-' + stamp)
 bak = json.load(open(CB_PATH + '.bak-' + stamp))
 
-pi = json.load(open(PI_PATH))
+pi = pi_cache.load()
 cb = json.load(open(CB_PATH))
 models = cb.get('models', [])
 by_id = {m['id']: m for m in models if 'id' in m}
@@ -145,7 +149,9 @@ for pname, pdata in pi['providers'].items():
             items = pdata.get('models', [])
             out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
     else:
-        items = pdata.get('models', [])
+        items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+        if dropped:
+            out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
     for m in items:
         mid = m['id']
         seen.add(norm(mid))
@@ -164,6 +170,11 @@ for pname, pdata in pi['providers'].items():
             'supportsReasoning': reasoning,
             'useCustomProtocol': False,
         }
+        # 参数写入：pi 原装 contextWindow/maxTokens → codebuddy 的 maxInputTokens/maxOutputTokens
+        if m.get('contextWindow'):
+            entry['maxInputTokens'] = m['contextWindow']
+        if m.get('maxTokens'):
+            entry['maxOutputTokens'] = m['maxTokens']
         # 匹配现有条目（先精确 id，再 url+id，再规范化 id）
         existing = by_id.get(mid) or by_url_id.get((url, mid)) or by_norm_id.get(norm(mid))
         if existing:

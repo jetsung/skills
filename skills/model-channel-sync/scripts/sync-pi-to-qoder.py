@@ -8,7 +8,7 @@
 两者 settings.json 结构完全相同。同步时**按目录存在情况处理**——哪个目录存在就同步哪个，
 两个都存在则两个都同步；两个都不存在则报错退出。不再区分 qoder/qoder-cn/qodercli/qoderclicn。
 
-按需修改下方 PI_PATH / ALIAS / TARGET / CHANNEL_DISPLAY。
+按需修改下方 ALIAS / TARGET / CHANNEL_DISPLAY。
 规则：
 - **渠道匹配**：baseUrl 去尾斜杠强绑定（唯一）→ ALIAS 显式映射 → 规范化 displayName（仅未占用 provider）；
   无匹配渠道**自动创建**新 provider（key=qoder-custom-{uuid4}，结构与现有条目一致）
@@ -26,10 +26,13 @@
   model 自动升级为同族最高版本（如 agnes-2.0/2.5/3.0-flash 用 agnes-3.0-flash）；model 为空时取首个模型同族最高版本；同版本/无版本号一律不动
 幂等可重复执行；自动备份（.bak-YYYYMMDD）并断言校验；密钥不回显。
 """
-import json, re, os, shutil, datetime, uuid
+import json, re, os, shutil, datetime, uuid, sys
+
+sys.dont_write_bytecode = True  # 不生成 __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pi_cache
 import fetch_free
 
-PI_PATH = os.path.expanduser('~/.pi/agent/models.json')
 # 同步目标目录：存在才同步，两个都存在则两个都同步
 QODER_DIRS = tuple(d for d in ('~/.qoder', '~/.qoder-cn') if os.path.isdir(os.path.expanduser(d)))
 ALIAS = {}  # 规范化 displayName 兜底失败时的手动映射，如 {'newapi': 'Qoder Custom ...'}
@@ -157,7 +160,9 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
                 src_models = pdata.get('models', [])
                 out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
         else:
-            src_models = pdata.get('models', [])
+            src_models, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
+            if dropped:
+                out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
         items = [i for i in src_models if wanted(i, pname)]
         if not items:
             out.append(f'跳过 {pname}: 无模型（空列表，或免费渠道过滤后为空）')
@@ -241,14 +246,18 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
         # 补缺失的目标模型 + 规范现有目标模型的 displayName（渠道前缀格式，幂等）
         existing = {mm['model'] for mm in prov['models']}
         ref = next((mm for mm in prov['models'] if isinstance(mm, dict)), {})
-        ctx = ref.get('contextWindow', 200000)
-        mout = ref.get('maxOutputTokens', 8192)
         added, renamed = [], []
         for item in src_models:
             if not wanted(item, pname):
                 continue
             mid = item['id']
             want = display_name(item, pname)
+            # 参数写入：优先用 pi 原装数据（contextWindow/maxTokens/input），
+            # pi 未提供时回退该渠道现有条目的取值，再回退通用默认值
+            ctx = item.get('contextWindow') or ref.get('contextWindow', 200000)
+            mout = item.get('maxTokens') or ref.get('maxOutputTokens', 8192)
+            vision = 'image' in (item.get('input') or []) or bool(
+                re.search(r'vision|/vl', mid, re.I))
             if mid in existing:
                 for mm in prov['models']:
                     if mm['model'] == mid and mm.get('displayName') != want:
@@ -260,7 +269,7 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
                 'displayName': want,
                 'contextWindow': ctx,
                 'maxOutputTokens': mout,
-                'capabilities': {'vision': False,
+                'capabilities': {'vision': vision,
                                  'thinking': {'modes': [], 'supportsEffort': False,
                                               'supportedEffortLevels': []}},
             })
@@ -333,7 +342,7 @@ def main():
     if not QODER_DIRS:
         raise SystemExit('错误：未找到任何 qoder 配置目录（~/.qoder 与 ~/.qoder-cn 均不存在），无可同步目标')
     print(f'同步目标目录: {", ".join(QODER_DIRS)}')
-    pi = json.load(open(PI_PATH))
+    pi = pi_cache.load()
     # 渠道短 id 索引（模型归属判定）
     channel_ids = {pname: {short_id(m['id']) for m in pdata.get('models', [])}
                    for pname, pdata in pi['providers'].items()}
