@@ -12,8 +12,8 @@ publish.py — 发布文章到 Flarum 论坛（Python 版，等价于上游 publ
 
 特点:
     - 直接用 requests 调 POST /api/discussions，避免 bash 历史扩展（标题/URL 中 `!` 被改坏）这类转义问题。
-    - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 优先取自身环境；
-      缺失时回退读取 ~/.workbuddy/settings.json。
+    - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 从进程环境读取，
+      不依赖任何 agent 私有配置文件；缺失时脚本报错退出，由 agent 向用户索取。
     - 标签解析与上游一致：逗号分隔的 ID / 名称 / slug 均可，纯数字视为 ID；
       标签缓存 ~/.cache/flarum_idev_tags 不存在时自动调用 fetch_tags.py 获取。
 """
@@ -23,31 +23,19 @@ import sys
 
 import requests
 
-SETTINGS_PATH = os.path.expanduser("~/.workbuddy/settings.json")
 TAGS_CACHE = os.path.expanduser("~/.cache/flarum_idev_tags")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_KEYS = ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID")
 
 
 def load_env():
-    env = {
-        "FLARUM_URL": os.environ.get("FLARUM_URL", ""),
-        "FLARUM_TOKEN": os.environ.get("FLARUM_TOKEN", ""),
-        "FLARUM_USER_ID": os.environ.get("FLARUM_USER_ID", ""),
-    }
-    if not env["FLARUM_URL"] or not env["FLARUM_TOKEN"]:
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as f:
-                s = json.load(f)
-            env["FLARUM_URL"] = env["FLARUM_URL"] or s.get("FLARUM_URL", "")
-            env["FLARUM_TOKEN"] = env["FLARUM_TOKEN"] or s.get("FLARUM_TOKEN", "")
-            env["FLARUM_USER_ID"] = env["FLARUM_USER_ID"] or s.get("FLARUM_USER_ID", "")
-        except FileNotFoundError:
-            pass
-    if not env["FLARUM_URL"]:
-        sys.stderr.write("错误: 未设置 FLARUM_URL（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
-        sys.exit(1)
-    if not env["FLARUM_TOKEN"]:
-        sys.stderr.write("错误: 未设置 FLARUM_TOKEN（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
+    env = {k: os.environ.get(k, "") for k in ENV_KEYS}
+    missing = [k for k in ("FLARUM_URL", "FLARUM_TOKEN") if not env[k]]
+    if missing:
+        sys.stderr.write(
+            "错误: 环境变量缺少 %s。请向用户索取论坛地址与 API 密钥后以环境变量传入。\n"
+            % "、".join(missing)
+        )
         sys.exit(1)
     return env
 
@@ -116,7 +104,7 @@ def usage():
   cat /tmp/article.md | publish.py "标题" -
 
 依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
-      FLARUM_USER_ID（可选）。缺失时自动回退读取 ~/.workbuddy/settings.json。
+      FLARUM_USER_ID（可选）从进程环境读取，无配置文件回退。
 """
 
 

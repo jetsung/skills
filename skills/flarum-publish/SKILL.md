@@ -3,7 +3,7 @@ name: flarum-publish
 description: 通过 Flarum REST API 把内容发布到 Flarum 论坛。当用户要求发布/投稿文章（主题/讨论）到 Flarum 论坛、同步内容到论坛、转存图片到论坛图床（fof/upload），或给出 GitHub 项目链接要求整理成中文文章发布时，使用本 skill——即使没有明说「Flarum」，只要是发帖到论坛即适用。支持按名称匹配标签（缓存于 ~/.cache/flarum_idev_tags，含默认/AI 标签组，按项目语言自动追加语言标签）。可选功能：项目文章发布后，仅当用户以关键词（如「整理教程」「生成使用教程」）触发时，把 GitHub 项目整理为基础使用教程并以回帖（POST /api/posts）回复到之前已创建的文章；agent 不得主动触发。
 compatibility: Requires Python 3 with requests, curl, and internet access (Flarum REST API, GitHub API)
 metadata:
-  version: "1.12.1"
+  version: "1.13.0"
 ---
 
 # Flarum 文章发布
@@ -36,7 +36,11 @@ metadata:
 | `FLARUM_TOKEN` | 是 | API Key 或 Access Token（见下方认证说明） |
 | `FLARUM_USER_ID` | 否 | 以指定用户身份发布，配合 API Key 使用（`userId=`） |
 
-任一必填变量缺失时，向用户询问，不要猜测。
+### 凭证来源
+
+脚本只从**进程环境变量**读取上表凭证，不读取、不写入任何配置文件，也不绑定任何特定 agent 的私有配置目录——在任何 agent 中都能用，只要把环境变量传进去。
+
+任一必填变量缺失时，脚本以非 0 退出并在 stderr 指明缺哪几个变量。此时 **agent 必须停下来向用户索取论坛地址与 API 密钥**，拿到后以环境变量重新调用；不得猜测凭证，也不得把凭证写入文件留到下次。
 
 ## 网络规则（中国网络代理）
 
@@ -297,10 +301,10 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 cat article.md | "$SKILL_PATH/scripts/publish.py" "标题" -
 ```
 
-正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.py` 获取）。脚本依赖 `python3`（已含 `requests`）与上述环境变量（缺失时自动回退读取 `~/.workbuddy/settings.json`）。
+正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.py` 获取）。脚本依赖 `python3`（已含 `requests`）与[环境变量](#环境变量)一节所列凭证——只读进程环境变量，无配置文件回退；缺失时脚本报错退出，此时向用户索取论坛地址与 API 密钥。
 
 > **推荐用 Python 版，并避开 shell 转义坑**：本 skill 的脚本已统一为 Python（`publish.py` / `fetch_tags.py` / `upload_image.py`），优先使用它们。原因与坑位：
-> - **不要用 `export $(python3 -c "... {v!r} ...")` 之类内联命令把 `settings.json` 注入 shell 环境变量**——zsh/bash 会把 `{v!r}` 里的 `!r` 当成历史扩展改坏，导致 `FLARUM_URL` 等变量被污染、发布失败。正确做法：直接调 `publish.py`（它自行读 `settings.json`，不经过 shell），或把环境变量先写进临时文件再 `source`（用完即删，勿落盘 token）。
+> - **凭证通过环境变量传给脚本，不要写进任何配置文件**。优先用执行环境本身的变量注入能力（agent 运行命令时直接带上 `FLARUM_URL` / `FLARUM_TOKEN`）；若只能在交互式 shell 里设置，用 `read -rs FLARUM_TOKEN` 从终端静默读入，避免 token 进入 shell 历史或落盘。**不要**用 `export $(python3 -c "... {v!r} ...")` 之类内联命令拼接变量——zsh/bash 会把 `{v!r}` 里的 `!r` 当成历史扩展改坏，导致 `FLARUM_URL` 等变量被污染、发布失败。
 > - 标题或正文含 `!`（如 `!http`、`!r`）时，`publish.sh` 类 bash 写法偶发失败；`publish.py` 走 `requests` 直连，天然无此问题。
 > - 直接调脚本时，标题/路径用双引号包裹、或用 `--` 风格传参即可；正文从 `-`/文件读入最稳妥。
 

@@ -14,9 +14,8 @@ upload_image.py — 转存图片到论坛图床（Flarum fof/upload 插件）
 输出: 每个输入一行「<来源>\\t<论坛图床URL>」，图床地址为协议相对形式（//host/path）
 依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
-      缺失时自动回退读取 ~/.workbuddy/settings.json。
+      以上均从进程环境读取，不依赖任何 agent 私有配置文件。
 """
-import json
 import mimetypes
 import os
 import re
@@ -25,9 +24,9 @@ import tempfile
 
 import requests
 
-SETTINGS_PATH = os.path.expanduser("~/.workbuddy/settings.json")
 PROXY = "https://filetas.asfd.cn"
 MAX_BYTES = 4194304  # 论坛限制 4096 kb，留一点余量
+ENV_KEYS = ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID", "IS_CHINA")
 
 # mimetypes 默认不认 webp/avif，显式补一张表
 EXTRA_MIME = {
@@ -43,21 +42,7 @@ EXTRA_MIME = {
 
 
 def load_env():
-    env = {
-        "FLARUM_URL": os.environ.get("FLARUM_URL", ""),
-        "FLARUM_TOKEN": os.environ.get("FLARUM_TOKEN", ""),
-        "FLARUM_USER_ID": os.environ.get("FLARUM_USER_ID", ""),
-        "IS_CHINA": os.environ.get("IS_CHINA", ""),
-    }
-    if not env["FLARUM_URL"] or not env["FLARUM_TOKEN"]:
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as f:
-                s = json.load(f)
-            for k in ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID", "IS_CHINA"):
-                env[k] = env[k] or s.get(k, "")
-        except FileNotFoundError:
-            pass
-    return env
+    return {k: os.environ.get(k, "") for k in ENV_KEYS}
 
 
 def raw_to_api(url):
@@ -173,7 +158,7 @@ def usage():
 
 依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
-      缺失时自动回退读取 ~/.workbuddy/settings.json。
+      以上均从进程环境读取，无配置文件回退。
 """
 
 
@@ -187,8 +172,12 @@ def main():
         sys.stderr.write("用法: %s <图片URL|本地文件> [更多...]\n" % sys.argv[0])
         sys.exit(1)
     env = load_env()
-    if not env["FLARUM_URL"] or not env["FLARUM_TOKEN"]:
-        sys.stderr.write("错误: 未设置 FLARUM_URL / FLARUM_TOKEN（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
+    missing = [k for k in ("FLARUM_URL", "FLARUM_TOKEN") if not env[k]]
+    if missing:
+        sys.stderr.write(
+            "错误: 环境变量缺少 %s。请向用户索取论坛地址与 API 密钥后以环境变量传入。\n"
+            % "、".join(missing)
+        )
         sys.exit(1)
 
     tmp_root = tempfile.mkdtemp(prefix="flarum_up_")

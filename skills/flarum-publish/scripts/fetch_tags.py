@@ -7,8 +7,7 @@ fetch_tags.py — 获取 Flarum 标签列表并缓存到 ~/.cache/flarum_idev_ta
 用法:
     fetch_tags.py [--force]
 
-环境变量: FLARUM_URL (必填), FLARUM_TOKEN (必填), FLARUM_USER_ID (可选);
-          缺失时自动回退读取 ~/.workbuddy/settings.json。
+环境变量: FLARUM_URL (必填), FLARUM_TOKEN (必填), FLARUM_USER_ID (可选)。
 """
 import json
 import os
@@ -16,30 +15,18 @@ import sys
 
 import requests
 
-SETTINGS_PATH = os.path.expanduser("~/.workbuddy/settings.json")
 TAGS_CACHE = os.path.expanduser("~/.cache/flarum_idev_tags")
+ENV_KEYS = ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID")
 
 
 def load_env():
-    env = {
-        "FLARUM_URL": os.environ.get("FLARUM_URL", ""),
-        "FLARUM_TOKEN": os.environ.get("FLARUM_TOKEN", ""),
-        "FLARUM_USER_ID": os.environ.get("FLARUM_USER_ID", ""),
-    }
-    if not env["FLARUM_URL"] or not env["FLARUM_TOKEN"]:
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as f:
-                s = json.load(f)
-            env["FLARUM_URL"] = env["FLARUM_URL"] or s.get("FLARUM_URL", "")
-            env["FLARUM_TOKEN"] = env["FLARUM_TOKEN"] or s.get("FLARUM_TOKEN", "")
-            env["FLARUM_USER_ID"] = env["FLARUM_USER_ID"] or s.get("FLARUM_USER_ID", "")
-        except FileNotFoundError:
-            pass
-    if not env["FLARUM_URL"]:
-        sys.stderr.write("错误: 未设置 FLARUM_URL（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
-        sys.exit(1)
-    if not env["FLARUM_TOKEN"]:
-        sys.stderr.write("错误: 未设置 FLARUM_TOKEN（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
+    env = {k: os.environ.get(k, "") for k in ENV_KEYS}
+    missing = [k for k in ("FLARUM_URL", "FLARUM_TOKEN") if not env[k]]
+    if missing:
+        sys.stderr.write(
+            "错误: 环境变量缺少 %s。请向用户索取论坛地址与 API 密钥后以环境变量传入。\n"
+            % "、".join(missing)
+        )
         sys.exit(1)
     return env
 

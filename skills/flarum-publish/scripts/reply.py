@@ -12,8 +12,8 @@ reply.py — 在已有讨论下回帖（POST /api/posts）
 
 特点:
     - 直接用 requests 调 POST /api/posts，避免 bash 转义问题（与 publish.py 一致）。
-    - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 优先取自身环境；
-      缺失时回退读取 ~/.workbuddy/settings.json。
+    - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 从进程环境读取，
+      不依赖任何 agent 私有配置文件；缺失时脚本报错退出，由 agent 向用户索取。
 """
 import json
 import os
@@ -21,29 +21,17 @@ import sys
 
 import requests
 
-SETTINGS_PATH = os.path.expanduser("~/.workbuddy/settings.json")
+ENV_KEYS = ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID")
 
 
 def load_env():
-    env = {
-        "FLARUM_URL": os.environ.get("FLARUM_URL", ""),
-        "FLARUM_TOKEN": os.environ.get("FLARUM_TOKEN", ""),
-        "FLARUM_USER_ID": os.environ.get("FLARUM_USER_ID", ""),
-    }
-    if not env["FLARUM_URL"] or not env["FLARUM_TOKEN"]:
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as f:
-                s = json.load(f)
-            env["FLARUM_URL"] = env["FLARUM_URL"] or s.get("FLARUM_URL", "")
-            env["FLARUM_TOKEN"] = env["FLARUM_TOKEN"] or s.get("FLARUM_TOKEN", "")
-            env["FLARUM_USER_ID"] = env["FLARUM_USER_ID"] or s.get("FLARUM_USER_ID", "")
-        except FileNotFoundError:
-            pass
-    if not env["FLARUM_URL"]:
-        sys.stderr.write("错误: 未设置 FLARUM_URL（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
-        sys.exit(1)
-    if not env["FLARUM_TOKEN"]:
-        sys.stderr.write("错误: 未设置 FLARUM_TOKEN（环境变量或 %s 中均缺失）\n" % SETTINGS_PATH)
+    env = {k: os.environ.get(k, "") for k in ENV_KEYS}
+    missing = [k for k in ("FLARUM_URL", "FLARUM_TOKEN") if not env[k]]
+    if missing:
+        sys.stderr.write(
+            "错误: 环境变量缺少 %s。请向用户索取论坛地址与 API 密钥后以环境变量传入。\n"
+            % "、".join(missing)
+        )
         sys.exit(1)
     return env
 
@@ -68,7 +56,7 @@ def usage():
   cat /tmp/tutorial.md | reply.py 1234 -
 
 依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
-      FLARUM_USER_ID（可选）。缺失时自动回退读取 ~/.workbuddy/settings.json。
+      FLARUM_USER_ID（可选）从进程环境读取，无配置文件回退。
 """
 
 
