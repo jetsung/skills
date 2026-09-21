@@ -4,6 +4,7 @@ description: Install, configure, drive, sync, and troubleshoot Atuin — the she
 license: MIT
 compatibility: Runs anywhere a POSIX shell is available. Docs reference Atuin >= 18.18; agent-hooks and record store assume >= 18.13. `cargo`/`gh` only needed for the self-hosting path.
 metadata:
+  version: "1.0.0"
   upstream: https://docs.atuin.sh
   repo: https://github.com/atuinsh/atuin
 ---

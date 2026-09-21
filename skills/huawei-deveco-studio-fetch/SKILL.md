@@ -2,6 +2,8 @@
 name: huawei-deveco-studio-fetch
 description: '提取华为 DevEco Studio 下载地址与 SHA-256。当用户需要从华为开发者联盟下载中心（developer.huawei.com/consumer/cn/download）获取 DevEco Studio / Command Line Tools 的签名下载链接与 SHA-256 校验值时使用，尤其是不真正下载、只读取响应头 x-amz-content-sha256 的场景。触发示例：①“提取华为 DevEco 下载地址与 SHA-256”；②“获取 DevEco Studio Mac 版下载链接和校验和”；③“huawei-deveco-studio-fetch”；④“下载中心最新版的签名 URL 和 sha256”。仅在与 chrome-devtools MCP 配合、浏览器以真正 headless 模式运行时使用。'
 license: MIT
+metadata:
+  version: "1.0.0"
 ---
 
 # 提取华为 DevEco 下载地址与 SHA-256

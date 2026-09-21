@@ -8,6 +8,8 @@ description: >-
   "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"时，都应使用此技能。
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
+metadata:
+  version: "1.0.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -103,7 +105,7 @@ compatibility: Requires curl, python3 (with PyYAML), and network access to provi
 | omp (Oh My Pi) | https://omp.sh/docs/custom-models |
 | opencode | https://opencode.ai/docs/models 、https://opencode.ai/docs/providers |
 | dsh（DeepSeek Harness） | https://deepseek-harness.github.io/deepseek-harness/guide/providers |
-| zcode | —（无官方文档，以 `references/zcode.md` 为准） |
+| zcode | GitHub 源码：https://github.com/zai-org/ZCode （schema 入口：`packages/provider/src/config/provider-data-schema.ts`、`packages/provider/src/config/rule-data-schema.ts`、`packages/shared/src/model-config.ts`） |
 | qoder | —（providers 段为 BYOK 存储，以 `references/qoder.md` 为准） |
 | codebuddy | https://www.codebuddy.cn/docs/cli/models |
 

@@ -1,8 +1,9 @@
 ---
 name: flarum-publish
-description: 发布文章（主题）到 Flarum 论坛，支持通过 REST API 创建讨论、按名称匹配标签、将文章配图转存到论坛图床（fof/upload）；也可将 GitHub 项目链接整理为中文文章后发布。标签列表缓存于 ~/.cache/flarum_idev_tags，支持默认标签组与 AI 项目标签组，可按项目语言自动追加语言标签。当用户要求发布/投稿文章到 Flarum 论坛、同步内容到论坛、把图片转存到论坛图床，或要求把 GitHub 项目整理成论坛文章时使用。
+description: 通过 Flarum REST API 把内容发布到 Flarum 论坛。当用户要求发布/投稿文章（主题/讨论）到 Flarum 论坛、同步内容到论坛、转存图片到论坛图床（fof/upload），或给出 GitHub 项目链接要求整理成中文文章发布时，使用本 skill——即使没有明说「Flarum」，只要是发帖到论坛即适用。支持按名称匹配标签（缓存于 ~/.cache/flarum_idev_tags，含默认/AI 标签组，按项目语言自动追加语言标签）。可选功能：项目文章发布后，仅当用户以关键词（如「整理教程」「生成使用教程」）触发时，把 GitHub 项目整理为基础使用教程并以回帖（POST /api/posts）回复到之前已创建的文章；agent 不得主动触发。
+compatibility: Requires Python 3 with requests, curl, and internet access (Flarum REST API, GitHub API)
 metadata:
-  version: "1.10.0"
+  version: "1.12.1"
 ---
 
 # Flarum 文章发布
@@ -17,6 +18,7 @@ metadata:
 - [网络规则（中国网络代理）](#网络规则中国网络代理)
 - [认证](#认证)
 - [发布流程](#发布流程)
+- [项目教程回帖（可选功能）](#项目教程回帖可选功能)
 - [查重](#查重)
 - [标签策略](#标签策略)
 - [API 端点](#api-端点)
@@ -62,7 +64,7 @@ metadata:
    ```
 3. 加代理前缀 `https://filetas.asfd.cn/<原始地址>`。
 
-`scripts/upload_image.sh` 已内置这套降级逻辑，下载图片时不必手工处理。
+`scripts/upload_image.py` 已内置这套降级逻辑，下载图片时不必手工处理。
 
 ## 认证
 
@@ -92,12 +94,21 @@ metadata:
 
 1. **准备内容**（两条路径任选）：
    - **用户提供文章/文件**：确认标题与正文。正文使用 Markdown（Flarum 首帖支持 Markdown 格式存储）。若用户提供的是文件路径，读取全文作为正文；若未提供标题，从正文提炼。
-   - **用户提供 GitHub 项目链接**（如 `https://github.com/<owner>/<repo>`）：按 [docs/github-article.md](docs/github-article.md) 的工作流采集仓库信息（API 元数据 + README），套用 [examples/demo.md](examples/demo.md) 模板整理成中文文章（成品参照 [examples/openshot.md](examples/openshot.md)），**保存为临时文件（默认 `/tmp/article.md`）**，再发布。注意：标题为 `<项目名称>：<总结性定位>`，**从 README 总结提炼、20 汉字以内、不照搬 GitHub API 的 description**（见 [docs/github-article.md](docs/github-article.md) 写作要求）。**标题与正文第一行必须一致**：正文第一行写 `# <标题>`（带 `# ` 前缀的 Markdown 一级标题），发布时传给 `publish.sh` 的标题参数为去掉 `# ` 前缀的同一字符串，两者内容完全一致。
+   - **用户提供 GitHub 项目链接**（如 `https://github.com/<owner>/<repo>`）：按 [docs/github-article.md](docs/github-article.md) 的工作流采集仓库信息（API 元数据 + README），套用 [examples/demo.md](examples/demo.md) 模板整理成中文文章（成品参照 [examples/openshot.md](examples/openshot.md)），**保存为临时文件（默认 `/tmp/article.md`）**，再发布。注意：标题为 `<项目名称>：<总结性定位>`，**从 README 总结提炼、20 汉字以内、不照搬 GitHub API 的 description**（见 [docs/github-article.md](docs/github-article.md) 写作要求）。**标题与正文第一行必须一致**：正文第一行写 `# <标题>`（带 `# ` 前缀的 Markdown 一级标题），发布时传给 `publish.py` 的标题参数为去掉 `# ` 前缀的同一字符串，两者内容完全一致。
 2. **查重**：从标题提取项目名称，搜索论坛检查是否已存在该项目讨论（见[查重](#查重)）。已存在时向用户展示已有讨论并询问是否仍要发布。
 3. **确认信息**：发布前向用户展示 标题 / 正文摘要 / 目标标签 / 图片（如有），确认后再发布。这是对外可见的公开操作，必须经用户确认。图片需展示完整 URL 供用户点击查看后自行选定，**确认选图后才转存到图床**（见[图片选择与图床转存](#图片选择与图床转存)）。
-4. **确定标签**：按 [标签策略](#标签策略) 选择标签组。默认组 `[55,57]`（开源项目、开源社区），AI 项目组 `[63,86]`（人工智能、AI 项目）。GitHub 项目还需追加语言标签（见标签策略）。最终标签以逗号分隔的 ID 传给 `publish.sh`。
-5. **发布**：调用 `scripts/publish.sh`（见[使用脚本](#使用脚本)）。
+4. **确定标签**：按 [标签策略](#标签策略) 选择标签组。默认组 `[55,57]`（开源项目、开源社区），AI 项目组 `[63,86]`（人工智能、AI 项目）。GitHub 项目还需追加语言标签（见标签策略）。最终标签以逗号分隔的 ID 传给 `publish.py`。
+5. **发布**：调用 `scripts/publish.py`（见[使用脚本](#使用脚本)）。
 6. **验证**：脚本输出新讨论的 ID 与链接（`$FLARUM_URL/d/<id>`），向用户报告。
+
+## 项目教程回帖（可选功能）
+
+发布项目文章之后，用户可以**关键词触发**（如「整理教程」「生成使用教程」）把该项目整理成一篇基础使用教程，并以**回帖**形式回复到之前已创建的文章下。此功能不随发布流程自动执行，agent 不得主动询问或代为触发。
+
+- 触发与内容要求（排除捐赠、stars 数量等与教程无关的描述）：见 [docs/github-tutorial.md](docs/github-tutorial.md)。
+- 教程为临时产物，保存到 `/tmp`（如 `/tmp/tutorial.md`）。
+- **回帖中引用主帖/站内讨论时用内链**：`[TITLE](/d/<POST_ID>)`，不补全论坛 URL。
+- 回帖用 `scripts/reply.py`（见[使用脚本](#使用脚本)），回帖前必须经用户确认教程全文。
 
 ## 查重
 
@@ -149,9 +160,9 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 
 标签列表缓存于 `~/.cache/flarum_idev_tags`（Flarum `GET /api/tags?include=parent` 的原始 JSON 响应）。
 
-- 文件不存在时，运行 `scripts/fetch_tags.sh` 自动获取并保存（`publish.sh` 在需要解析标签名称时也会自动调用）。
-- 刷新缓存：`scripts/fetch_tags.sh --force`。
-- 查看可用标签：直接读取缓存文件，或运行 `fetch_tags.sh`（已存在时输出摘要）。
+- 文件不存在时，运行 `scripts/fetch_tags.py` 自动获取并保存（`publish.py` 在需要解析标签名称时也会自动调用）。
+- 刷新缓存：`scripts/fetch_tags.py --force`。
+- 查看可用标签：直接读取缓存文件，或运行 `fetch_tags.py`（已存在时输出摘要）。
 
 ### 常用标签组
 
@@ -159,6 +170,7 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 | --- | --- | --- | --- |
 | 默认（开源项目） | `55, 57` | 开源项目、开源社区 | 一般开源项目 |
 | AI 项目 | `63, 86` | 人工智能、AI 项目 | AI / LLM / 机器学习相关项目 |
+| AI 模型 | `63, 69` | 人工智能、AI 模型 | AI 模型相关项目（大模型、模型权重/推理等，slug：`llm`、`aimodels`） |
 
 ### 标签数量限制
 
@@ -167,12 +179,13 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 1. 基础标签组（默认组或 AI 组，2 个）；
 2. 语言标签（1 个）。
 
-即 GitHub 项目最多为「基础组 2 个 + 语言 1 个 = 3 个」；未匹配到语言标签时为 2 个。任何情况下都不得把 4 个及以上标签传给 `publish.sh`。
+即 GitHub 项目最多为「基础组 2 个 + 语言 1 个 = 3 个」；未匹配到语言标签时为 2 个。任何情况下都不得把 4 个及以上标签传给 `publish.py`。
 
 ### 标签选择规则
 
 1. **判断项目类型**：根据项目描述、README 内容、GitHub `topics` 等判断是否为 AI 相关项目。
    - 涉及 LLM、大模型、机器学习、深度学习、AI 工具/平台/教程、自然语言处理、计算机视觉等 → AI 项目，使用 `[63, 86]`。
+   - **项目主体是 AI 模型本身**（发布/推理大模型、模型权重、模型评测与对比等，而非模型之上的工具/平台）→ AI 模型组，使用 `[63, 69]`。
    - 其他 → 默认组 `[55, 57]`。
    - 无法确定时，向用户确认。
 
@@ -205,7 +218,7 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
    - 以上对照表为已知映射；遇到未列出的语言时，从标签缓存中按名称/slug 模糊匹配，匹配不到则跳过，不追加。
    - 最终标签组 = 基础标签组 + 语言标签（去重），**总数最多 3 个**（见[标签数量限制](#标签数量限制)）。
 
-3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.sh` 的第三个参数，如 `"$SKILL_PATH/scripts/publish.sh" "标题" /tmp/article.md "55,57,21"`。
+3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.py` 的第三个参数，如 `"$SKILL_PATH/scripts/publish.py" "标题" /tmp/article.md "55,57,21"`。
 
 ## API 端点
 
@@ -225,17 +238,17 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 
 当文章需要配图时（尤其是 GitHub 项目），**必须由用户确认是否添加图片以及选择哪张图片**，不要自动指定。
 
-**关键顺序：先给用户看 URL，确认选图之后才转存。** 不要未经确认就把图片往论坛图床上传。
+**关键顺序：先列出可点击的候选图片 URL，用户手动选定之后才转存。** 在用户手动选图之前，**不得预先转存任何图片到图床**（即使只有一张候选图也不行）。不要未经确认就把图片往论坛图床上传。
 
 ### 流程
 
 1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge、sponsor 图标）等非实质图片。
 2. **拼接完整 URL**：相对路径拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>`。
-3. **先在对话中输出图片链接（弹出选择框之前）**：把每个候选图片按「`<简短描述>: <完整URL>`」格式逐行输出到对话中，每行一个，如：
+3. **先在对话中输出可点击的图片链接（弹出选择框之前）**：把每个候选图片按「`<简短描述>` + 链接」格式逐行输出到对话中，每行一个。链接使用 HTML `<a>` 标签或 Markdown `[图片说明](URL)` 形式，方便用户手动点击在浏览器中查看；**URL 用原图地址（如 `https://raw.githubusercontent.com/...`），不加代理前缀**。如：
 
-   ```
-   架构图: <https://example.com/example.png>
-   效果对比图: <https://example.com/compare.png>
+   ```markdown
+   [架构图](https://example.com/example.png)
+   [效果对比图](https://example.com/compare.png)
    ```
 
    目的是让用户能直接点击打开查看每张图片，再据此决定选择框里选哪些。**必须先完成这一步输出，再弹出选择框。**
@@ -247,7 +260,7 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
    - 多张图片时可允许多选。
    - 若某个候选地址已失效（如 404），不要塞进选项；可改用项目官网等来源的可用图片，并在选项描述里注明来源。
 5. **检查大小并转存到图床**：用户选定后，先用 `curl -sIL` 检查每张图的大小（取 `content-length`，无则下载到本地临时文件用 `stat -c%s` 取字节数）：
-   - **≤1MB**：直接用 `scripts/upload_image.sh` 转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出图床地址。用户明确要保留原始地址时，可跳过转存。
+   - **≤1MB**：直接用 `scripts/upload_image.py` 转存到论坛图床（见[使用脚本](#使用脚本)），脚本会输出图床地址。用户明确要保留原始地址时，可跳过转存。
    - **>1MB**：不直接转存，进入 [图片压缩与转存（>1MB 场景）](#图片压缩与转存1mb-场景) 流程——用 `oxipng` / `rimage` 尝试压缩；压缩后 <1MB 则转存，两工具都压不下来（失败或仍 ≥1MB）则直接引用原图 URL（**不加代理前缀**）。
 6. **写入正文**：以 `![<alt>](<图床URL>)` 格式插入 `## 主要功能` 列表之后、`---` 分隔线之前。**图床地址保持协议相对形式，即 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`**：
 
@@ -261,97 +274,78 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 - `raw.githubusercontent.com` 在部分网络下不可达，不适合直接作为正文图片地址。
 - 转存拿到的地址必须**回填进正文**：图片托管在图床不等于正文引用了它，漏了这一步读者看到的仍是打不开的原图地址。
 - 图片若自行下载到本地，注意工作区临时文件不持久，下载与转存应在同一次操作内完成。
-- 论坛图片有体积上限（实测 4096 kb），超限会被拒绝；`upload_image.sh` 会在上传前拦下超过 4 MB 的文件。
+- 论坛图片有体积上限（实测 4096 kb），超限会被拒绝；`upload_image.py` 会在上传前拦下超过 4 MB 的文件。
 
 ## 图片压缩与转存（>1MB 场景）
 
-当候选图片 >1MB 时，不直接转存，而是先用本地压缩工具尝试压到 <1MB，再转存到论坛图床；若两工具都压不下来（压缩失败或压缩后仍 ≥1MB），则回退到原图 URL（**不加代理前缀**）。
+当候选图片 >1MB 时，不直接转存，而是先用本地压缩工具（`oxipng` / `rimage`，SVG 先经 `resvg` 转 PNG）尝试压到 <1MB 再转存；两工具都压不下来（失败或仍 ≥1MB）则直接引用原图 URL（**不加代理前缀**）。
 
-### 工具安装（未安装时自动安装）
-
-运行前检查 `oxipng` 与 `rimage` 是否已安装，缺失则用下列命令安装（安装脚本由用户托管于 `fx4.cn`）：
-
-```bash
-which oxipng >/dev/null 2>&1 || curl -L fx4.cn/oxipng | bash
-which rimage >/dev/null 2>&1 || curl -L fx4.cn/rimage | bash
-```
-
-安装后验证：`oxipng --version` 与 `rimage --version` 应能正常执行。
-
-**沙箱 / 受限环境下的两个坑（实测）**：
-
-1. **PATH 里可能没有 `/usr/local/bin`**，导致 `which oxipng` 误判为未安装——工具其实早就装好了。检测时按绝对路径兜底：
-   ```bash
-   for t in oxipng rimage; do
-     p=$(command -v $t || echo "/usr/local/bin/$t")
-     [ -x "$p" ] && echo "$t -> $p"
-   done
-   ```
-   命中绝对路径后直接用绝对路径调用（`/usr/local/bin/oxipng ...`），别再跑安装脚本。
-2. **`fx4.cn` 安装脚本在本机必失败**：它解压到 `/tmp`，而 `/tmp` 只有 10 MB 的 tmpfs，还会因 `Cannot change ownership to uid 1001` 报错退出。不要反复重试安装脚本；改为手动装（解压加 `--no-same-owner`，装到 PATH 内可写目录如 `~/.local/bin`）：
-   ```bash
-   tar --no-same-owner -xzf <包>.tar.gz -C <工作区目录>
-   install -m 755 <包>/oxipng ~/.local/bin/oxipng
-   ```
-   （`/usr/bin`、`/usr/local/bin` 在沙箱里可能是只读的，写入前先 `touch` 测一下。）
-
-### 压缩算法（两工具互相兜底）
-
-对单个 >1MB 图片，按以下流程处理（两个工具互为兜底：一个不行就换另一个，不重复尝试已失败的工具）：
-
-1. 下载原图到本地临时文件（受 [网络规则](#网络规则中国网络代理) 代理规则约束）。
-2. 依次尝试 `oxipng` 与 `rimage`（顺序不限），**任一工具满足「压缩成功 且 结果 <1MB」即采用该产物并停止尝试**：
-   - `oxipng -o max --strip safe --out <out.png> <in.png>`（仅处理 PNG；非 PNG 直接判定该工具不可用，换下一个）。注意 oxipng 10.x 的 `-o` 是优化级别、输出文件必须用 `--out`，写成 `... <in> -o <out>` 会报 usage 错误。实测：1.32 MB 的 PNG 用这条命令可压到 812 KB。
-   - `rimage png --directory <输出目录> --suffix _min <in.png>`（通用格式，需带子命令如 `png`/`webp`/`mozjpeg`；输出到 `--directory` 并加 `--suffix`，不支持「输入+输出」两个位置参数写法）。**实测它对 PNG 反而会变大**（1.35 MB → 8 MB），所以 PNG 优先用 oxipng，rimage 只作兜底。
-   - GIF / 动图两个工具都处理不了（oxipng 只吃 PNG，rimage 无 gif 子命令），会走到「两工具都失败」分支，直接引用原图 URL。
-3. **命中（某工具成功且 <1MB）**：将该产物转存到论坛图床（如 `flarum-images.w.idev.top`），正文使用协议相对地址 `//host/path`。
-4. **两工具都失败 / 结果仍 ≥1MB**：放弃压缩，直接引用原图 URL，**不加代理前缀**（即 `https://raw.githubusercontent.com/...` 原样，不套 `filetas.asfd.cn`）。
-
-> 兜底判定：「压缩不了」= 命令报错、不支持该格式、或进程非零退出；「压缩后还是大于 1M」= 压缩成功但字节数 ≥1048576。任一情形都立即切换到另一个工具；两个都不行才回退原图 URL。
+**处理此类图片时，先加载 [references/image-compression.md](references/image-compression.md)**——工具安装（含沙箱环境的坑）、具体命令行写法与兜底判定规则都在该文件中。
 
 ## 使用脚本
 
-### publish.sh — 发布讨论
+### publish.py — 发布讨论
 
 ```bash
 # 基本用法（无标签）
-"$SKILL_PATH/scripts/publish.sh" "标题" /path/to/article.md
+"$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md
 
 # 带标签（ID 或名称，多个用逗号分隔）
-"$SKILL_PATH/scripts/publish.sh" "标题" /path/to/article.md "55,57,21"
+"$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md "55,57,21"
 
 # 正文从 stdin 读入
-cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
+cat article.md | "$SKILL_PATH/scripts/publish.py" "标题" -
 ```
 
-正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.sh` 获取）。脚本依赖 `curl`、`python3` 与上述环境变量。
+正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.py` 获取）。脚本依赖 `python3`（已含 `requests`）与上述环境变量（缺失时自动回退读取 `~/.workbuddy/settings.json`）。
 
-### fetch_tags.sh — 获取标签缓存
+> **推荐用 Python 版，并避开 shell 转义坑**：本 skill 的脚本已统一为 Python（`publish.py` / `fetch_tags.py` / `upload_image.py`），优先使用它们。原因与坑位：
+> - **不要用 `export $(python3 -c "... {v!r} ...")` 之类内联命令把 `settings.json` 注入 shell 环境变量**——zsh/bash 会把 `{v!r}` 里的 `!r` 当成历史扩展改坏，导致 `FLARUM_URL` 等变量被污染、发布失败。正确做法：直接调 `publish.py`（它自行读 `settings.json`，不经过 shell），或把环境变量先写进临时文件再 `source`（用完即删，勿落盘 token）。
+> - 标题或正文含 `!`（如 `!http`、`!r`）时，`publish.sh` 类 bash 写法偶发失败；`publish.py` 走 `requests` 直连，天然无此问题。
+> - 直接调脚本时，标题/路径用双引号包裹、或用 `--` 风格传参即可；正文从 `-`/文件读入最稳妥。
+
+### reply.py — 在已有讨论下回帖
+
+把整理好的教程等内容以回帖形式发布到已有讨论（`POST /api/posts`）。
+
+```bash
+# 回帖到讨论 1234
+"$SKILL_PATH/scripts/reply.py" 1234 /tmp/tutorial.md
+
+# 正文从 stdin 读入
+cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
+```
+
+- 第一个参数为讨论的数字 ID（从讨论链接 `$FLARUM_URL/d/<id>` 中取得），第二个参数为正文文件或 `-`（stdin）。
+- 输出回帖成功信息与讨论链接；依赖环境变量与 `publish.py` 相同。
+- 用于[项目教程回帖（可选功能）](#项目教程回帖可选功能)，回帖前必须经用户确认内容。
+
+### fetch_tags.py — 获取标签缓存
 
 ```bash
 # 首次获取或检查缓存
-"$SKILL_PATH/scripts/fetch_tags.sh"
+"$SKILL_PATH/scripts/fetch_tags.py"
 
 # 强制刷新缓存
-"$SKILL_PATH/scripts/fetch_tags.sh" --force
+"$SKILL_PATH/scripts/fetch_tags.py" --force
 ```
 
 标签缓存文件：`~/.cache/flarum_idev_tags`（原始 API JSON 响应）。
 
-### upload_image.sh — 图片转存到论坛图床
+### upload_image.py — 图片转存到论坛图床
 
 把图片（本地文件或远程 URL）转存到论坛图床，拿到国内可直连的地址后写进正文。
 
 ```bash
 # 单个 URL（GitHub raw 会自动降级到 api.github.com / 代理前缀）
-"$SKILL_PATH/scripts/upload_image.sh" \
+"$SKILL_PATH/scripts/upload_image.py" \
   "https://raw.githubusercontent.com/<owner>/<repo>/main/assets/hero.png"
 
 # 本地文件
-"$SKILL_PATH/scripts/upload_image.sh" ./hero.png
+"$SKILL_PATH/scripts/upload_image.py" ./hero.png
 
 # 多张一起转存
-"$SKILL_PATH/scripts/upload_image.sh" ./a.png ./b.png
+"$SKILL_PATH/scripts/upload_image.py" ./a.png ./b.png
 ```
 
 - 输出：每个输入一行「`<来源>` + Tab + `<图床URL>`」，其中图床地址为**协议相对形式**（`//host/path`），可直接粘进正文；确需绝对地址时自行补 `https:`。失败的行打到 stderr，脚本以非 0 退出。
@@ -365,7 +359,7 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 - [examples/openshot.md](examples/openshot.md)：一篇完整的示例文章（Markdown 首帖正文，含标题、简介、功能列表、图片与外链）。对应的发布命令：
 
   ```bash
-  "$SKILL_PATH/scripts/publish.sh" "OpenShot：开源的视频编辑软件" \
+  "$SKILL_PATH/scripts/publish.py" "OpenShot：开源的视频编辑软件" \
     "$SKILL_PATH/examples/openshot.md" "55,57"
   ```
 
@@ -376,5 +370,5 @@ cat article.md | "$SKILL_PATH/scripts/publish.sh" "标题" -
 - **发布前必须经用户确认**标题、正文与标签。
 - **图片必须先经用户确认选图，再转存到图床**；不得未经确认就往图床传图。
 - **标签总数最多 3 个**（2–3 个正确），超限会被论坛拒绝或截断。
-- 不得修改或删除论坛上已有的讨论（本 skill 只做创建）。
+- 不得修改或删除论坛上已有的讨论（本 skill 只做创建）。**已发布的讨论视为最终状态、均已正确落盘，不回溯处理历史文章**（补图、换图床、改标签等一律不做）；仅在用户明确要求修正某篇旧文时才可改动。
 - 不要将 token、密码写入文件、日志或提交记录。

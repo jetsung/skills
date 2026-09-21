@@ -3,6 +3,8 @@ name: update-gh-action-version
 description: 自动更新 GitHub Actions 工作流文件中使用的 Action 版本。使用场景：用户需要更新 GitHub Actions workflow 文件中的 action 版本，或者要求升级到最新版本。
 compatibility: Requires curl, sed, and access to the GitHub API. Optionally set GITHUB_TOKEN to avoid rate limits
 allowed-tools: Bash(scripts/update_action.sh:*)
+metadata:
+  version: "1.0.0"
 ---
 
 # Update GitHub Actions Versions

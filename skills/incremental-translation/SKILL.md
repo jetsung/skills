@@ -1,6 +1,8 @@
 ---
 name: incremental-translation
 description: 通用中文文档项目的增量更新与 AI 翻译工作流。包含拉取上游最新文档、对比改动、生成待翻译列表以及执行增量翻译。不绑定特定项目，通过环境变量与 deploy.sh 适配任意文档仓库。
+metadata:
+  version: "1.0.0"
 ---
 
 # 增量翻译工作流 Skill (Incremental Translation Workflows)
