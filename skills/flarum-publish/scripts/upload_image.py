@@ -12,7 +12,7 @@ upload_image.py — 转存图片到论坛图床（Flarum fof/upload 插件）
     upload_image.py ./local.png https://example.com/b.jpg
 
 输出: 每个输入一行「<来源>\\t<论坛图床URL>」，图床地址为协议相对形式（//host/path）
-依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
       以上均从进程环境读取，不依赖任何 agent 私有配置文件。
 """
@@ -156,7 +156,7 @@ def usage():
   upload_image.py https://raw.githubusercontent.com/owner/repo/main/assets/a.png
   upload_image.py ./local.png https://example.com/b.jpg
 
-依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
       以上均从进程环境读取，无配置文件回退。
 """

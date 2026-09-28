@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fetch_tags.py — 获取 Flarum 标签列表并缓存到 ~/.cache/flarum_idev_tags
+fetch_tags.py — 获取 Flarum 标签列表并缓存到 ~/.cache/flarum/tags.json
 （Python 版，等价于上游 fetch_tags.sh）
 
 用法:
@@ -15,7 +15,7 @@ import sys
 
 import requests
 
-TAGS_CACHE = os.path.expanduser("~/.cache/flarum_idev_tags")
+TAGS_CACHE = os.path.expanduser("~/.cache/flarum/tags.json")
 ENV_KEYS = ("FLARUM_URL", "FLARUM_TOKEN", "FLARUM_USER_ID")
 
 

@@ -55,7 +55,7 @@ def usage():
   reply.py 1234 /tmp/tutorial.md
   cat /tmp/tutorial.md | reply.py 1234 -
 
-依赖: python3 + requests；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）从进程环境读取，无配置文件回退。
 """
 

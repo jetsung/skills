@@ -1,9 +1,9 @@
 ---
 name: flarum-publish
-description: 通过 Flarum REST API 把内容发布到 Flarum 论坛。当用户要求发布/投稿文章（主题/讨论）到 Flarum 论坛、同步内容到论坛、转存图片到论坛图床（fof/upload），或给出 GitHub 项目链接要求整理成中文文章发布时，使用本 skill——即使没有明说「Flarum」，只要是发帖到论坛即适用。支持按名称匹配标签（缓存于 ~/.cache/flarum_idev_tags，含默认/AI 标签组，按项目语言自动追加语言标签）。可选功能：项目文章发布后，仅当用户以关键词（如「整理教程」「生成使用教程」）触发时，把 GitHub 项目整理为基础使用教程并以回帖（POST /api/posts）回复到之前已创建的文章；agent 不得主动触发。
-compatibility: Requires Python 3 with requests, curl, and internet access (Flarum REST API, GitHub API)
+description: 通过 Flarum REST API 把内容发布到 Flarum 论坛。当用户要求发布/投稿文章（主题/讨论）到 Flarum 论坛、同步内容到论坛、转存图片到论坛图床（fof/upload），或给出 GitHub 项目链接要求整理成中文文章发布时，使用本 skill——即使没有明说「Flarum」，只要是发帖到论坛即适用。支持按名称匹配标签（缓存于 ~/.cache/flarum/tags.json，含默认/AI 标签组，按项目语言自动追加语言标签）。可选功能：项目文章发布后，仅当用户以关键词（如「整理教程」「生成使用教程」）触发时，把 GitHub 项目整理为基础使用教程并以回帖（POST /api/posts）回复到之前已创建的文章；agent 不得主动触发。
+compatibility: Requires uv (Python env at ~/.cache/flarum/uv) with requests, curl, and internet access (Flarum REST API, GitHub API)
 metadata:
-  version: "1.13.0"
+  version: "1.15.0"
 ---
 
 # Flarum 文章发布
@@ -162,11 +162,12 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 
 ### 标签缓存
 
-标签列表缓存于 `~/.cache/flarum_idev_tags`（Flarum `GET /api/tags?include=parent` 的原始 JSON 响应）。
+标签列表缓存于 `~/.cache/flarum/tags.json`（Flarum `GET /api/tags?include=parent` 的原始 JSON 响应）。
 
 - 文件不存在时，运行 `scripts/fetch_tags.py` 自动获取并保存（`publish.py` 在需要解析标签名称时也会自动调用）。
-- 刷新缓存：`scripts/fetch_tags.py --force`。
+- 刷新缓存：`"$FLARUM_PY" scripts/fetch_tags.py --force`。
 - 查看可用标签：直接读取缓存文件，或运行 `fetch_tags.py`（已存在时输出摘要）。
+- 缓存与 Python 运行环境同在 `~/.cache/flarum/` 下（`tags.json` 与 `uv/`），脚本会自动创建该目录。
 
 ### 常用标签组
 
@@ -222,7 +223,7 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
    - 以上对照表为已知映射；遇到未列出的语言时，从标签缓存中按名称/slug 模糊匹配，匹配不到则跳过，不追加。
    - 最终标签组 = 基础标签组 + 语言标签（去重），**总数最多 3 个**（见[标签数量限制](#标签数量限制)）。
 
-3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.py` 的第三个参数，如 `"$SKILL_PATH/scripts/publish.py" "标题" /tmp/article.md "55,57,21"`。
+3. **传给脚本**：最终标签组以逗号分隔的 ID 传给 `publish.py` 的第三个参数，如 `"$FLARUM_PY" "$SKILL_PATH/scripts/publish.py" "标题" /tmp/article.md "55,57,21"`。
 
 ## API 端点
 
@@ -246,7 +247,12 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 
 ### 流程
 
-1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），过滤掉徽章（shields.io、badge、sponsor 图标）等非实质图片。
+1. **收集候选图片**：从 README 中提取所有图片引用（Markdown `![alt](path)` 或 HTML `<img src="path">`），**只保留实质配图**（产品截图、演示图、架构图、效果对比图），过滤掉以下非实质图片：
+   - **徽章**：shields.io、文件名/路径含 `badge`、sponsor / donate / patron 图标。
+   - **LOGO 与品牌图**：文件名为 `logo.*`、`icon.*`、`favicon.*`、`brand.*`、`mark.*`，或位于 `logo/`、`icons/`、`brand/` 等目录下的图片，以及项目品牌标识、宣传 banner。**即使 LOGO 紧接标题出现在 README 第一行，也不得把它当作 hero 图列为候选**。
+   - **功能图标**：`<img>` 带 `width` / `height` ≤ 64、明显是小尺寸图标或 emoji 图片的引用。
+
+   过滤后若无候选图，按「无图」处理（不要为了凑图把 LOGO 塞进选项）；确有价值的配图只来自官网时，可改用官网截图并注明来源。
 2. **拼接完整 URL**：相对路径拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>`。
 3. **先在对话中输出可点击的图片链接（弹出选择框之前）**：把每个候选图片按「`<简短描述>` + 链接」格式逐行输出到对话中，每行一个。链接使用 HTML `<a>` 标签或 Markdown `[图片说明](URL)` 形式，方便用户手动点击在浏览器中查看；**URL 用原图地址（如 `https://raw.githubusercontent.com/...`），不加代理前缀**。如：
 
@@ -288,20 +294,43 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 
 ## 使用脚本
 
+### Python 运行环境（uv）
+
+脚本统一跑在一个由 uv 管理的隔离环境里，路径固定为 `~/.cache/flarum/uv`——不依赖任何特定机器上的 Python 安装、agent 私有目录或全局 `pip`，换机器只要装了 `uv` 就能重建。
+
+```bash
+# 定义解释器变量（后续所有脚本调用都用它）
+FLARUM_PY="$HOME/.cache/flarum/uv/bin/python"
+
+# 环境不存在时才创建（uv venv 会重建目录，已存在就别再跑，免得丢掉已装依赖）
+if [ ! -x "$FLARUM_PY" ]; then
+  command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | bash
+  export PATH="$HOME/.local/bin:$PATH"
+  uv venv "$HOME/.cache/flarum/uv"
+fi
+uv pip install --python "$FLARUM_PY" requests   # 已装则幂等
+```
+
+- 该环境可长期复用，同一台机器上第二次起只跑最后一行（或直接跑脚本，报 `ModuleNotFoundError: No module named 'requests'` 时才补装）。
+- 无 `uv` 时按上面的安装命令获取；确实装不了 `uv` 才退回系统 `python3`，并为其安装 `requests`。
+- 凭证仍从环境变量读取，无需改动脚本。
+
+下文示例中的 `"$FLARUM_PY"` 即上述解释器；不要直接执行脚本文件（shebang 走系统 `python3`，可能缺 `requests`），一律显式指定解释器。`publish.py` 内部调用 `fetch_tags.py` 时用 `sys.executable`，会自动沿用同一个环境。
+
 ### publish.py — 发布讨论
 
 ```bash
 # 基本用法（无标签）
-"$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md
+"$FLARUM_PY" "$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md
 
 # 带标签（ID 或名称，多个用逗号分隔）
-"$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md "55,57,21"
+"$FLARUM_PY" "$SKILL_PATH/scripts/publish.py" "标题" /path/to/article.md "55,57,21"
 
 # 正文从 stdin 读入
-cat article.md | "$SKILL_PATH/scripts/publish.py" "标题" -
+cat article.md | "$FLARUM_PY" "$SKILL_PATH/scripts/publish.py" "标题" -
 ```
 
-正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum_idev_tags` 缓存解析；缓存不存在时自动调用 `fetch_tags.py` 获取）。脚本依赖 `python3`（已含 `requests`）与[环境变量](#环境变量)一节所列凭证——只读进程环境变量，无配置文件回退；缺失时脚本报错退出，此时向用户索取论坛地址与 API 密钥。
+正文也可用 `-` 从 stdin 读入。标签参数支持纯数字 ID（直接使用）或名称/slug（从 `~/.cache/flarum/tags.json` 缓存解析；缓存不存在时自动调用 `fetch_tags.py` 获取）。脚本依赖 `requests` 库与[环境变量](#环境变量)一节所列凭证——只读进程环境变量，无配置文件回退；缺失时脚本报错退出，此时向用户索取论坛地址与 API 密钥。
 
 > **推荐用 Python 版，并避开 shell 转义坑**：本 skill 的脚本已统一为 Python（`publish.py` / `fetch_tags.py` / `upload_image.py`），优先使用它们。原因与坑位：
 > - **凭证通过环境变量传给脚本，不要写进任何配置文件**。优先用执行环境本身的变量注入能力（agent 运行命令时直接带上 `FLARUM_URL` / `FLARUM_TOKEN`）；若只能在交互式 shell 里设置，用 `read -rs FLARUM_TOKEN` 从终端静默读入，避免 token 进入 shell 历史或落盘。**不要**用 `export $(python3 -c "... {v!r} ...")` 之类内联命令拼接变量——zsh/bash 会把 `{v!r}` 里的 `!r` 当成历史扩展改坏，导致 `FLARUM_URL` 等变量被污染、发布失败。
@@ -314,10 +343,10 @@ cat article.md | "$SKILL_PATH/scripts/publish.py" "标题" -
 
 ```bash
 # 回帖到讨论 1234
-"$SKILL_PATH/scripts/reply.py" 1234 /tmp/tutorial.md
+"$FLARUM_PY" "$SKILL_PATH/scripts/reply.py" 1234 /tmp/tutorial.md
 
 # 正文从 stdin 读入
-cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
+cat /tmp/tutorial.md | "$FLARUM_PY" "$SKILL_PATH/scripts/reply.py" 1234 -
 ```
 
 - 第一个参数为讨论的数字 ID（从讨论链接 `$FLARUM_URL/d/<id>` 中取得），第二个参数为正文文件或 `-`（stdin）。
@@ -328,13 +357,13 @@ cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
 
 ```bash
 # 首次获取或检查缓存
-"$SKILL_PATH/scripts/fetch_tags.py"
+"$FLARUM_PY" "$SKILL_PATH/scripts/fetch_tags.py"
 
 # 强制刷新缓存
-"$SKILL_PATH/scripts/fetch_tags.py" --force
+"$FLARUM_PY" "$SKILL_PATH/scripts/fetch_tags.py" --force
 ```
 
-标签缓存文件：`~/.cache/flarum_idev_tags`（原始 API JSON 响应）。
+标签缓存文件：`~/.cache/flarum/tags.json`（原始 API JSON 响应）。
 
 ### upload_image.py — 图片转存到论坛图床
 
@@ -342,14 +371,14 @@ cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
 
 ```bash
 # 单个 URL（GitHub raw 会自动降级到 api.github.com / 代理前缀）
-"$SKILL_PATH/scripts/upload_image.py" \
+"$FLARUM_PY" "$SKILL_PATH/scripts/upload_image.py" \
   "https://raw.githubusercontent.com/<owner>/<repo>/main/assets/hero.png"
 
 # 本地文件
-"$SKILL_PATH/scripts/upload_image.py" ./hero.png
+"$FLARUM_PY" "$SKILL_PATH/scripts/upload_image.py" ./hero.png
 
 # 多张一起转存
-"$SKILL_PATH/scripts/upload_image.py" ./a.png ./b.png
+"$FLARUM_PY" "$SKILL_PATH/scripts/upload_image.py" ./a.png ./b.png
 ```
 
 - 输出：每个输入一行「`<来源>` + Tab + `<图床URL>`」，其中图床地址为**协议相对形式**（`//host/path`），可直接粘进正文；确需绝对地址时自行补 `https:`。失败的行打到 stderr，脚本以非 0 退出。
@@ -363,7 +392,7 @@ cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
 - [examples/openshot.md](examples/openshot.md)：一篇完整的示例文章（Markdown 首帖正文，含标题、简介、功能列表、图片与外链）。对应的发布命令：
 
   ```bash
-  "$SKILL_PATH/scripts/publish.py" "OpenShot：开源的视频编辑软件" \
+  "$FLARUM_PY" "$SKILL_PATH/scripts/publish.py" "OpenShot：开源的视频编辑软件" \
     "$SKILL_PATH/examples/openshot.md" "55,57"
   ```
 
@@ -373,6 +402,7 @@ cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" 1234 -
 
 - **发布前必须经用户确认**标题、正文与标签。
 - **图片必须先经用户确认选图，再转存到图床**；不得未经确认就往图床传图。
+- **候选图片排除 LOGO、品牌标识、图标与徽章**，只提供产品截图、架构图、演示图等实质配图（见[图片选择与图床转存](#图片选择与图床转存)）。
 - **标签总数最多 3 个**（2–3 个正确），超限会被论坛拒绝或截断。
 - 不得修改或删除论坛上已有的讨论（本 skill 只做创建）。**已发布的讨论视为最终状态、均已正确落盘，不回溯处理历史文章**（补图、换图床、改标签等一律不做）；仅在用户明确要求修正某篇旧文时才可改动。
 - 不要将 token、密码写入文件、日志或提交记录。

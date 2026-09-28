@@ -38,7 +38,7 @@
    - 若仓库根目录有 README 的多语言文件（如 `README.zh-CN.md`），优先取简体中文版原文。
    - 若 README 含多语言切换链接（如 openaitx），直接取简体中文版本链接里的原文，或自行翻译英文正文。
    - HTML 片段（`<p align="center">`、`<details>` 徽章区等）剥离，只保留实质内容。
-3. **截图**：README 中引用的仓库内图片（`assets/...`、`docs/...` 等）为相对路径，需拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>` 方可外显。从 README 中提取所有候选图片（`![alt](path)` 或 HTML `<img src="path">`），拼接完整 URL 后**逐张展示给用户选择**：
+3. **截图**：README 中引用的仓库内图片（`assets/...`、`docs/...` 等）为相对路径，需拼接为 `https://raw.githubusercontent.com/<owner>/<repo>/<分支>/<路径>` 方可外显。从 README 中提取所有候选图片（`![alt](path)` 或 HTML `<img src="path">`），**先剔除 LOGO、品牌标识、图标与徽章**（文件名为 `logo.*` / `icon.*` / `favicon.*` / `brand.*`、路径含 `badge` 或位于 `logo/`、`icons/`、`brand/` 目录、`<img>` 声明的 `width`/`height` ≤ 64），**只保留产品截图、架构图、演示图、效果对比图等实质配图**——即使 LOGO 紧接标题出现在 README 第一行，也不得把它当作 hero 图列为候选。拼接完整 URL 后**逐张展示给用户选择**：
    - **先在对话中列出可点击的图片 URL（弹出选择框之前）**：每行一条，用 HTML `<a>` 标签或 Markdown `[图片说明](URL)` 形式（如 `[架构图](https://raw.githubusercontent.com/<owner>/<repo>/main/assets/hero.png)`），方便用户手动点击在浏览器中查看；URL 用原图地址，**不加代理前缀**。必须先完成这一步输出，再弹出选择框。
    - 用提问工具（如 `AskUserQuestion`）展示候选图片列表，每个选项的 `description` 中包含完整图片 URL（方便用户点击查看后自行决定选哪张）。
    - **先列出 URL、拿到用户手动选图，再转存**；用户手动选图之前不得预先转存任何图片到图床（即使只有一张候选图也不行）。
@@ -49,11 +49,11 @@
      curl -s "https://api.github.com/repos/<owner>/<repo>/contents/docs/assets/<文件名>?ref=<分支>"
      ```
      命中后取其 `download_url`（即 raw 地址）作为候选，同时在给用户看图片时说明该图来自仓库其他目录。
-   - 0 张候选图片时，跳过图片行。README 里唯一的图若是失效链接（404）或只是徽章，正文可改用项目官网的可用截图，并在选项描述中注明来源。
+   - 0 张候选图片时，跳过图片行。README 里唯一的图若是失效链接（404）、只是徽章或是 LOGO / 品牌图标，正文可改用项目官网的可用截图，并在选项描述中注明来源。
    - **检查大小**：用户选定后，用 `curl -sIL` 取 `content-length`（无则下载到本地临时文件用 `stat -c%s` 取字节数）。**≤1MB** 适合直接转存图床；**>1MB** 需先按 [references/image-compression.md](../references/image-compression.md) 压缩——尝试 `oxipng` / `rimage`，压缩后 <1MB 转存，两工具都失败则用原图 URL（不加代理前缀）。
    - 用户选定后，先转存到论坛图床再写入正文：
      ```bash
-     "$SKILL_PATH/scripts/upload_image.py" "<选中的图片 URL 或本地文件>"
+     "$FLARUM_PY" "$SKILL_PATH/scripts/upload_image.py" "<选中的图片 URL 或本地文件>"
      # 输出: <来源>	<图床URL>
      ```
      将返回的图床地址以 `![<alt>](<图床URL>)` 格式插入正文的 `## 主要功能` 列表之后、`---` 分隔线之前。**地址保持协议相对形式 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`。** 用户明确要求保留原始地址时才用原地址。

@@ -37,9 +37,9 @@
 4. **回帖**：调用 `scripts/reply.py`：
 
    ```bash
-   "$SKILL_PATH/scripts/reply.py" <discussion_id> /tmp/tutorial.md
+   "$FLARUM_PY" "$SKILL_PATH/scripts/reply.py" <discussion_id> /tmp/tutorial.md
    # 或正文从 stdin 读入
-   cat /tmp/tutorial.md | "$SKILL_PATH/scripts/reply.py" <discussion_id> -
+   cat /tmp/tutorial.md | "$FLARUM_PY" "$SKILL_PATH/scripts/reply.py" <discussion_id> -
    ```
 
 5. **验证**：脚本输出回帖成功信息与讨论链接，向用户报告。

@@ -2,14 +2,15 @@
 name: model-channel-sync
 description: >-
   管理 AI 模型渠道（provider）配置：①提取真正可用的免费/零价模型（抓取 → 筛选 → 连通性实测 → 剔除不可用 → 给出结论）；
-  ②以 pi 等平台配置为基准，同步/更新渠道、模型、APIKEY 到多个 agent 工具（pi、zcode、dsh、omp、opencode、qoder、codebuddy、dbx 等）的配置文件。
+  ②以 pi 等平台配置为基准，同步/更新渠道、模型、APIKEY 到多个 agent 工具（pi、zcode、dsh、omp、opencode、mimocode、qoder、codebuddy、dbx 等）的配置文件。
   凡用户提到"获取/提取/列出 XX 渠道免费模型"、"从价格判断免费模型"、"查价格为零的模型"、"有哪些免费模型可用"、
-  "给 XX 渠道加免费模型"、"这个免费模型能用吗/测试一下"、"把模型更新到 pi/omp/opencode/dsh/zcode/qoder/codebuddy/dbx"、
-  "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"时，都应使用此技能。
+  "给 XX 渠道加免费模型"、"这个免费模型能用吗/测试一下"、"把模型更新到 pi/omp/opencode/mimocode/dsh/zcode/qoder/codebuddy/dbx"、
+  "以 pi 为基准更新 XX 渠道"、"同步渠道/模型/APIKEY 到 XX"、"更新 XX 的 APIKEY"、
+  "同步到 mimocode / 覆盖 mimocode 的提供商 / pi 同步到 mimocode"时，都应使用此技能。
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -32,6 +33,7 @@ metadata:
 - "以 pi 平台的配置为基准，更新 XX 平台的提供商及模型"
 - "同步渠道/模型/APIKEY 到 XX"
 - "更新 XX 的 APIKEY"
+- "把模型同步到 mimocode / 覆盖 mimocode 的 provider"
 
 ## 前置步骤：确认渠道、筛选方式与目标工具（必须）
 
@@ -66,6 +68,7 @@ metadata:
 | pi | `~/.pi/agent/models.json` | `references/pi.md` |
 | omp (Oh My Pi) | `~/.omp/agent/models.yml` | `references/omp.md` |
 | opencode | `~/.config/opencode/opencode.json` | `references/opencode.md` |
+| mimocode | `~/.config/mimocode/mimocode.jsonc` | `references/mimocode.md` |
 | dsh (DeepSeek Harness) | `~/.dsh/settings.yaml` | `references/dsh.md` |
 | zcode | `~/.zcode/v2/provider_config.json` | `references/zcode.md` |
 | qoder | `~/.qoder/settings.json`（国外版）与 `~/.qoder-cn/settings.json`（国内版） | `references/qoder.md` |
@@ -104,6 +107,7 @@ metadata:
 | pi | https://pi.dev/docs/latest/models |
 | omp (Oh My Pi) | https://omp.sh/docs/custom-models |
 | opencode | https://opencode.ai/docs/models 、https://opencode.ai/docs/providers |
+| mimocode | https://mimo.xiaomi.com/mimocode/config.json （schema） |
 | dsh（DeepSeek Harness） | https://deepseek-harness.github.io/deepseek-harness/guide/providers |
 | zcode | GitHub 源码：https://github.com/zai-org/ZCode （schema 入口：`packages/provider/src/config/provider-data-schema.ts`、`packages/provider/src/config/rule-data-schema.ts`、`packages/shared/src/model-config.ts`） |
 | qoder | —（providers 段为 BYOK 存储，以 `references/qoder.md` 为准） |
@@ -234,7 +238,8 @@ done
 |----------|----------|-------------|-------------|
 | pi | `references/pi.md` | `providers.{渠道}.models` 数组 `{id, name}`，可补 maxTokens/contextWindow/reasoning/input/cost | 保留 `!echo -n "$VAR"` 形式 |
 | omp | `references/omp.md` | `providers.{渠道}.models` YAML 列表 `{id, name}` | env 变量名**裸形式**（不带 `$`），保留 omp 现有引用（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY`，不可覆盖） |
-| opencode | `references/opencode.md` | `provider.{渠道}.models` 对象 map（key=id，value `{id, name, family}`） | 保留 `{env:XXX}` 占位符 |
+| opencode | `references/opencode.md` | `provider.{渠道}.models` 对象 map（key=id，value `{id, name, family}`）；provider 缺 `npm` 时补 `@ai-sdk/openai-compatible` | 保留 `{env:XXX}` 占位符 |
+| mimocode | `references/mimocode.md` | **不从 pi 直写**；经 opencode 中转后 `provider` 整块覆盖 | **写死明文实值**（解析 `{env:VAR}` / `!echo` 占位符） |
 | dsh | `references/dsh.md` | `llm-pi-ai.providers.{渠道}.models` 列表仅 `id` | 保留 `apiKeyEnv` 变量名 |
 | zcode | `references/zcode.md` | 规则式（`personalModelIds`/`modelOrder` + `providerModelRules`） | **写死明文实值**（不支持 env 引用） |
 | qoder | `references/qoder.md` | `providers.{qoder-custom-{UUID}}.models` 数组（id 字段名为 `model`） | **写死明文实值**（渠道顶层） |
@@ -243,9 +248,9 @@ done
 
 **共同规则：**
 - 只写**用户级（全局）**配置，**禁止修改项目级/工作区内的配置文件**（pi/omp/opencode/dsh/zcode/qoder/codebuddy 全部适用）
-- 只合并/新增模型条目，保留已有条目不变；同步为**合并式（只增不删）**，上游下架的模型不会自动移除，需清理时手动处理
+- 只合并/新增模型条目，保留已有条目不变；同步为**合并式（只增不删）**，上游下架的模型不会自动移除，需清理时手动处理（**mimocode 例外**：经 opencode 覆盖，整块替换）
 - 若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时一并更新到配置文件中（字段映射见各参考文件）
-- 渠道级字段（baseURL/kind/compat 等）：已有值不更新，仅目标缺失/为空时补入
+- 渠道级字段（baseURL/kind/compat/npm 等）：已有值不更新，仅目标缺失/为空时补入（opencode/mimocode 的 `npm` 缺失时补默认适配器 `@ai-sdk/openai-compatible`）
 
 ### 多工具全量同步（pi 为基准）
 
@@ -259,7 +264,18 @@ python3 scripts/sync-pi-to-zcode.py
 python3 scripts/sync-pi-to-qoder.py
 python3 scripts/sync-pi-to-codebuddy.py
 python3 scripts/sync-pi-to-dbx.py          # 写入 DBX ai_configs 表；加 --dry-run 只打印计划不写库
+python3 scripts/sync-pi-to-mimocode.py     # 两段流水线：pi → opencode → 覆盖 mimocode
 ```
+
+**mimocode 专用流水线（先 opencode 后覆盖，必须按序）**：mimocode 的 `provider` 与 opencode 同构，**不从 pi 直写**。目标是把 mimocode 的提供商**清空后用 opencode 的 `provider` 整块覆盖**（非合并）；**密钥写明文**（mimocode 不认 `{env:VAR}` 占位符，脚本自动解析环境变量实值）：
+
+```bash
+python3 scripts/sync-pi-to-mimocode.py              # ① pi→opencode 合并 ② opencode→mimocode 覆盖
+python3 scripts/sync-opencode-to-mimocode.py        # 只做②（opencode 已是最新时）
+python3 scripts/sync-opencode-to-mimocode.py --dry-run
+```
+
+细节与字段差异见 `references/mimocode.md`。覆盖后 mimocode 独有模型字段（如 `cachePromptTTL`）会丢失，需保留时在 opencode 源补。
 
 **上游免费渠道（kilo / openrouter）**：这两个渠道同步到 **zcode / dsh / qoder** 时**不走 pi models 基准**，改由 `scripts/fetch_free.py` 从上游 `GET {baseUrl}/models` 提取**免费模型**，须同时满足：
 1. **免费**：id 含 `:free`/`-free`/`/free` 标签，或 `pricing.prompt`/`completion` 均为 0（含临时免费）
@@ -300,8 +316,9 @@ python3 scripts/sync-pi-to-dbx.py          # 写入 DBX ai_configs 表；加 --d
   - qoder 的 id 字段名为 `model`（非 pi/dsh 的 `id`），`baseUrl` 顶层小写 l；渠道 key 为 `qoder-custom-{UUID}`，每渠道独立 provider + 独立密钥 + 独立模型
   - omp 的 `apiKey` 是 env 变量名裸形式（不带 `$`），与 pi 的 `!echo -n "$VAR"`、opencode 的 `{env:XXX}` 均不同
   - zcode 的 `api.type: anthropic-messages` 渠道无 `/models` 端点，模型列表从 `personalModelIds` 读取
+- **mimocode 走 opencode 中转，不做 pi 直写映射**；`sync-pi-to-mimocode.py` 必须先跑完 `sync-pi-to-opencode.py` 再覆盖。覆盖是**整块替换 provider**（只增不删规则对 mimocode 不适用）；**密钥必须明文**——`{env:VAR}`/`!echo` 占位符写入前解析为实值（优先级：env 实值 > 目标已有明文 > 空；与 zcode/qoder 同级）。`mimocode.jsonc` 可能含注释/尾逗号，解析须走 JSONC 宽容读取（脚本已内置）。
 - 环境变量名正则须含数字（`[A-Z0-9_]+`）；长脚本用 heredoc/独立脚本文件传给 python3，**不要用 bash 双引号 `-c "..."`**（会吞掉 `\$`/`\"` 转义导致正则失效）。
 - 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件；写回前备份、写回后对比备份断言只动了目标字段。
 - 写入明文密钥后报告**绝不回显密钥内容**，只报告长度/变化状态。
-- 写入明文密钥的配置文件（zcode/qoder/codebuddy/dbx）切勿提交到版本库。
+- 写入明文密钥的配置文件（zcode/qoder/codebuddy/dbx/mimocode）切勿提交到版本库。
 - **dbx 是 SQLite 数据库而非配置文件**：写库前先退出 DBX 应用（避免写锁与运行时覆盖）；写库前自动备份 `dbx.db.bak-YYYYMMDD`；数据目录定位（`DBX_DATA_DIR` 或平台默认路径）见 `references/dbx.md`；`is_default` 一律不改动，默认配置由用户在 DBX 设置中手动指定。

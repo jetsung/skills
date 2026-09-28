@@ -21,6 +21,7 @@
 - 配置文件 `~/.config/opencode/opencode.json`（支持 JSONC），`$schema: "https://opencode.ai/config.json"`；内置 75+ 提供商（经 AI SDK + [Models.dev](https://models.dev) 目录），凭据经 `/connect` 存于 `~/.local/share/opencode/auth.json`
 - **模型引用格式**：完整 id 为 `provider_id/model_id`；`provider_id` 是配置中 `provider` 对象的键名，`model_id` 是 `provider.models` 的键名
 - **provider 级字段**：
+  - `npm`：适配器包名；OpenAI 兼容端点用 `@ai-sdk/openai-compatible`，Anthropic Messages 用 `@ai-sdk/anthropic`。同步脚本对缺失/为空的 provider 兜底补 `@ai-sdk/openai-compatible`，已有值不动（补入位置在 `options` 之前）
   - `options.baseURL`：覆盖该 provider 的端点（代理/自建网关用）
   - `models`：对象 map，key 为模型 id，value 为模型条目（`{id, name, family}`，另可含下述 options/variants）
   - `blacklist`：`[模型id]`，从 `/models` 选择器隐藏指定模型；`whitelist`：只保留列出模型；两者可组合（先 whitelist 收窄再 blacklist 剔除）
@@ -52,7 +53,7 @@
 }
 ```
 
-> 同步脚本只合并 `provider.{渠道}.models` map（含各条目的 options/variants），不动 `options.baseURL` 等已有渠道字段。
+> 同步脚本只合并 `provider.{渠道}.models` map（含各条目的 options/variants）与补全缺失的 `npm`，不动 `options.baseURL` 等已有渠道字段。
 
 ## 全量同步脚本
 

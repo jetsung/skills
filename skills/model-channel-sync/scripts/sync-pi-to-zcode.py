@@ -127,9 +127,14 @@ for pname, pdata in pi['providers'].items():
         continue
     model_ids = [m['id'] for m in items]
 
-    # 匹配渠道：providerName 规范化 + 别名映射
-    rule = next((r for r in rules if r.get('providerName')
-                 and norm(r['providerName']) == norm(ALIAS.get(pname, pname))), None)
+    # 匹配渠道：baseUrl 去尾斜杠强绑定（唯一）→ providerName 规范化 + 别名映射
+    rule = None
+    burl = (pdata.get('baseUrl') or '').rstrip('/')
+    if burl:
+        rule = next((r for r in rules if ((r['config'].get('api') or {}).get('baseUrl') or '').rstrip('/') == burl), None)
+    if rule is None:
+        rule = next((r for r in rules if r.get('providerName')
+                     and norm(r['providerName']) == norm(ALIAS.get(pname, pname))), None)
     if rule is None:
         # 自动创建渠道：providerId = baseURL 域名主体；同主体不同 TLD 时确定性带顶级后缀消歧
         # （如 api.agnes-ai.cn 与 api.agnes-ai.com 均为 agnes-ai → agnes-ai-cn / agnes-ai-com），
@@ -195,8 +200,8 @@ for mid_r in ccfg['modelConfigRules']['providerModelRules']:
     assert set(mid_r['config'].keys()) == {'enabled'} and mid_r['config']['enabled'] is True, \
         f'{mid_r["modelId"]}: 模型 config 含额外字段'
 assert set(bcfg['providerOrder']) <= set(ccfg['providerOrder']), 'providerOrder 有删除'
-assert set(bcfg['modelConfigRules']['providerModelRules']) <= \
-    set(ccfg['modelConfigRules']['providerModelRules']) or True
+assert {(m['modelId'], m['providerId']) for m in bcfg['modelConfigRules']['providerModelRules']} <= \
+    {(m['modelId'], m['providerId']) for m in ccfg['modelConfigRules']['providerModelRules']}, 'providerModelRules 有删除'
 b_map = {(m['modelId'], m['providerId']): m for m in bcfg['modelConfigRules']['providerModelRules']}
 c_map = {(m['modelId'], m['providerId']): m for m in ccfg['modelConfigRules']['providerModelRules']}
 for k, v in b_map.items():

@@ -6,9 +6,10 @@
 
 opencode 的 apiKey 为 {env:XXX} 占位符，保留不动；只同步 models
 （对象 map，key = 模型 id，value = {id, name, family}，family 规则 = id 前缀或渠道名）。
+provider 缺失 npm 时补默认适配器 `@ai-sdk/openai-compatible`（插在 options 之前），已有值不动。
 pi 条目提供 contextWindow/maxTokens 限制时，新增条目写入 `limit.context/limit.output`，
 现有条目不一致即同步更新（来源为权威值）。
-幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增与限制字段同步；密钥不回显。
+幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增、限制字段同步与 npm 空值补充；密钥不回显。
 """
 import json, re, os, shutil, datetime, sys
 
@@ -18,10 +19,28 @@ import pi_cache
 
 OC_PATH = os.path.expanduser('~/.config/opencode/opencode.json')
 ALIAS = {'cloudflare-workers-ai': 'cloudflare-workers-ai'}  # 与 pi 同名，保留可扩展
+NPM_DEFAULT = '@ai-sdk/openai-compatible'
 
 
 def norm(s):
     return re.sub(r'[^a-z0-9]', '', s.lower())
+
+
+def ensure_npm(prov):
+    """provider 缺失/为空时补 npm 默认适配器，插在 options 之前；已有值不动。返回是否补入。"""
+    if prov.get('npm'):
+        return False
+    items = list(prov.items())
+    prov.clear()
+    inserted = False
+    for k, v in items:
+        if k == 'options' and not inserted:
+            prov['npm'] = NPM_DEFAULT
+            inserted = True
+        prov[k] = v
+    if not inserted:
+        prov['npm'] = NPM_DEFAULT
+    return True
 
 
 stamp = datetime.date.today().strftime('%Y%m%d')
@@ -43,6 +62,8 @@ for pname, pdata in pi['providers'].items():
         out.append(f'跳过 {pname}: opencode 无对应 provider')
         continue
     prov = providers[key]
+    if ensure_npm(prov):
+        out.append(f'{pname}: npm 空值补充（{NPM_DEFAULT}）')
     opts = prov.setdefault('options', {})
     if not opts.get('baseURL'):  # 规则：不更新已有值，仅空值补充（env 占位符风格）
         m = re.match(r'\{env:([A-Z0-9_]+)\}', opts.get('apiKey', ''))
@@ -105,13 +126,17 @@ for k in providers:
             if (cm[mk].get('limit') or {}).get(lk) != lv:
                 assert allow.get(lk) == (cm[mk].get('limit') or {}).get(lk), \
                     f'{k}: 现有模型条目 {mk} 的 limit.{lk} 被改动（无来源依据）'
-    assert {kk: vv for kk, vv in b.items() if kk not in ('models', 'options')} == \
-           {kk: vv for kk, vv in c.items() if kk not in ('models', 'options')}, f'{k}: 非 models/options 字段被改动'
+    assert {kk: vv for kk, vv in b.items() if kk not in ('models', 'options', 'npm')} == \
+           {kk: vv for kk, vv in c.items() if kk not in ('models', 'options', 'npm')}, f'{k}: 非 models/options/npm 字段被改动'
+    if b.get('npm'):
+        assert c.get('npm') == b['npm'], f'{k}: npm 已有值被改动'
+    else:
+        assert c.get('npm') in (None, '', NPM_DEFAULT), f'{k}: npm 被非法改动'
     bo, co = b.get('options', {}), c.get('options', {})
     for kk, vv in bo.items():
         if kk == 'baseURL':
             assert co.get('baseURL') == vv or (not vv and co.get('baseURL')), f'{k}: baseURL 被改动（已有值）'
         else:
             assert co.get(kk) == vv, f'{k}: options.{kk} 被改动'
-print('校验通过：仅 models 新增 / 限制字段同步')
+print('校验通过：仅 models 新增 / 限制字段同步 / npm 空值补充')
 print('\n'.join(out))
