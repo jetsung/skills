@@ -41,7 +41,11 @@ def load_env():
 
 
 def parse_tags(tag_input):
-    """逗号分隔的 ID / 名称 / slug -> [{'type':'tags','id':...}]。无输入返回 None。"""
+    """逗号分隔的 ID / 名称 / slug -> [{'type':'tags','id':...}]。无输入返回 None。
+
+    若 tag 为二级标签（isChild），自动补全其父标签（一并传给 API，否则 Flarum 校验失败）。
+    补全时将父插到子之前；去重；补全后若总数 >3 仅提示，不丢弃父（丢弃会导致校验失败）。
+    """
     if not tag_input:
         return None
     if not os.path.isfile(TAGS_CACHE):
@@ -55,6 +59,25 @@ def parse_tags(tag_input):
                 sys.exit(1)
     with open(TAGS_CACHE, encoding="utf-8") as f:
         doc = json.load(f)
+
+    # 构建 id -> tag 映射（合并 data + included）
+    tag_by_id = {}
+    for t in doc.get("data", []) + doc.get("included", []):
+        if t.get("type") == "tags" and t.get("id") not in tag_by_id:
+            tag_by_id[t["id"]] = t
+
+    def _parent_id(tag_id):
+        """取 tag 的父标签 id，无父或非二级则返回 None。"""
+        t = tag_by_id.get(str(tag_id))
+        if not t:
+            return None
+        attrs = t.get("attributes", {})
+        if not attrs.get("isChild"):
+            return None
+        parent_data = t.get("relationships", {}).get("parent", {}).get("data")
+        if parent_data and parent_data.get("id"):
+            return str(parent_data["id"])
+        return None
 
     tags = []
     for raw in tag_input.split(","):
@@ -80,6 +103,41 @@ def parse_tags(tag_input):
             sys.stderr.write("错误: 未找到标签「%s」\n可用标签: %s\n" % (name, avail))
             sys.exit(1)
         tags.append({"type": "tags", "id": found})
+
+    # 二级标签自动补全父标签（父插到子前，去重）
+    if tags:
+        # 先对输入去重保序
+        seen = set()
+        ordered_ids = []
+        for t in tags:
+            tid = str(t["id"])
+            if tid not in seen:
+                seen.add(tid)
+                ordered_ids.append(tid)
+        input_set = set(ordered_ids)
+        final_ids = []
+        seen_final = set()
+        for tid in ordered_ids:
+            pid = _parent_id(tid)
+            if pid and pid not in input_set and pid not in seen_final:
+                if pid in tag_by_id:
+                    final_ids.append(pid)
+                    seen_final.add(pid)
+                    input_set.add(pid)
+                    parent_name = tag_by_id.get(pid, {}).get("attributes", {}).get("name", pid)
+                    child_name = tag_by_id.get(tid, {}).get("attributes", {}).get("name", tid)
+                    sys.stderr.write(
+                        "已自动补全父标签: %s(%s) -> %s(%s)\n" % (child_name, tid, parent_name, pid)
+                    )
+                else:
+                    sys.stderr.write("警告: 标签 %s 的父标签 %s 不在缓存中，跳过补全\n" % (tid, pid))
+            if tid not in seen_final:
+                final_ids.append(tid)
+                seen_final.add(tid)
+        if len(final_ids) > 3:
+            sys.stderr.write("提示: 补全后标签数 %d 超过建议上限 3（Flarum 要求二级必带父级，已保留父级）\n" % len(final_ids))
+        tags = [{"type": "tags", "id": tid} for tid in final_ids]
+
     return tags or None
 
 

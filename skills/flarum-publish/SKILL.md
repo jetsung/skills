@@ -3,7 +3,7 @@ name: flarum-publish
 description: 通过 Flarum REST API 把内容发布到 Flarum 论坛。当用户要求发布/投稿文章（主题/讨论）到 Flarum 论坛、同步内容到论坛、转存图片到论坛图床（fof/upload），或给出 GitHub 项目链接要求整理成中文文章发布时，使用本 skill——即使没有明说「Flarum」，只要是发帖到论坛即适用。支持按名称匹配标签（缓存于 ~/.cache/flarum/tags.json，含默认/AI 标签组，按项目语言自动追加语言标签）。可选功能：项目文章发布后，仅当用户以关键词（如「整理教程」「生成使用教程」）触发时，把 GitHub 项目整理为基础使用教程并以回帖（POST /api/posts）回复到之前已创建的文章；agent 不得主动触发。
 compatibility: Requires uv (Python env at ~/.cache/flarum/uv) with requests, curl, and internet access (Flarum REST API, GitHub API)
 metadata:
-  version: "1.15.0"
+  version: "1.16.0"
 ---
 
 # Flarum 文章发布
@@ -185,6 +185,33 @@ curl -s --globoff "$FLARUM_URL/api/posts?filter[q]=<项目名>"
 2. 语言标签（1 个）。
 
 即 GitHub 项目最多为「基础组 2 个 + 语言 1 个 = 3 个」；未匹配到语言标签时为 2 个。任何情况下都不得把 4 个及以上标签传给 `publish.py`。
+
+> **例外：二级标签自动补全可能使总数 >3**——此时不裁剪父级（Flarum 要求二级必带父级，丢弃会导致 422），脚本会在 stderr 提示超限，仍提交完整补全后的列表。详见下方“二级标签必带父级”。
+
+### 二级标签必带父级（自动补全）
+
+Flarum 要求：若使用二级标签（`attributes.isChild == true`），必须同时提交其父标签（`relationships.parent.data.id`），否则 `POST /api/discussions` 返回 `422 validation_error`。常见成组标签已自带父级（如 `55,57`、`63,86`），无需处理；但**当要求其它单个标签且该标签恰好是二级标签时**，`publish.py` 会自动补全。
+
+规则（脚本侧自动完成，agent 无需手动拼接）：
+
+1. 以 `~/.cache/flarum/tags.json`（`GET /api/tags?include=parent` 的缓存）的 `isChild` / `relationships.parent` 判定层级；
+2. 输入为 ID / 名称 / slug 均可（纯数字视为 ID，其它按名称/slug 解析后再判定）；
+3. 命中二级则将父标签插到该子标签之前、去重（若输入已含父级，不重复；若一级或无父标签如语言标签，不补全）；
+4. 补全时在 stderr 输出 `已自动补全父标签: 子名(子ID) -> 父名(父ID)`；
+5. 补全后若总数 >3，额外输出 `提示: 补全后标签数 N 超过建议上限 3（已保留父级）`，仍提交（不可为省数量丢弃父级）。
+
+示例：
+
+| 输入 | 标签属性 | 实际提交 | 说明 |
+| --- | --- | --- | --- |
+| `86` | 二级 `AI 项目` 父 `63 人工智能` | `63,86` | 单个二级自动补父 |
+| `55` | 二级 `开源项目` 父 `57 开源社区` | `57,55` | 单个二级自动补父 |
+| `os_library` | `id 7` 父 `57` | `57,7` | 按 slug 命中后补父 |
+| `57` / `21` | 一级 / 无父 | `57` / `21` | 不补全 |
+| `55,57` | 已含父 | `55,57` | 去重不新增，保序提交 |
+| `86,87` | 同父 `63` 的两个二级 | `63,86,87` | 父仅补一次 |
+
+Agent 侧：正常按需求选标签即可，展示待发布标签给用户确认时，以脚本补全后的最终列表为准（可本地试算或看 stderr 提示）。
 
 ### 标签选择规则
 
