@@ -1,0 +1,54 @@
+; 高级模板：展示列提取、多选、预览、map、依赖继承
+; 参考 references/variables.md
+
+% docker, image
+
+# 删除镜像（按第 3 列，跳过表头）
+docker rmi <image_id>
+
+$ image_id: docker images --- --column 3 --header-lines 1 --delimiter '\s\s+'
+
+
+% git, branch
+
+# 切换分支
+git checkout <branch>
+
+$ branch: git branch | awk '{print $NF}'
+
+
+% files, pdf
+
+# 合并多个 PDF
+files=($(echo "<files>"))
+pdftk "${files[@]:-}" cat output <output>
+
+$ files: echo 'file1.pdf file2.pdf file3.pdf' | tr ' ' '\n' --- --multi --expand --fzf-overrides '--tac'
+$ output: echo "merged.pdf"
+
+
+% preview, files
+
+# 预览后选择文件
+cat "<file>"
+
+$ file: ls -la --- --preview 'cat {}' --preview-window 'right:50%'
+
+
+% map, example
+
+# 将 true/false 映射为 1/0
+echo <mapped>
+
+$ mapped: echo 'false true' | tr ' ' '\n' --- --map "grep -q t && echo 1 || echo 0"
+
+
+% dirs, common
+
+$ pictures_folder: echo "/my/pictures"
+
+% wallpapers
+@ dirs, common
+
+# 打印壁纸目录
+echo "<pictures_folder>/wallpapers"

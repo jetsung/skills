@@ -12,6 +12,7 @@
   - [incremental-translate](#incremental-translate)
   - [incremental-translation](#incremental-translation)
   - [model-channel-sync](#model-channel-sync)
+  - [navi](#navi)
   - [update-gh-action-version](#update-gh-action-version)
 - [安装](#安装)
 - [添加新 Skill](#添加新-skill)
@@ -141,6 +142,33 @@ cat article.md | skills/flarum-publish/scripts/publish.sh "标题" -
 - 支持 openrouter、kilo、opencode、newapi、nvidia、atomgit 等所有 OpenAI 兼容渠道
 - 「抓取 → 筛选（按价格=0 / free 标签 / 关键词）→ 连通性实测 → 剔除不可用」完整闭环
 - 按各工具配置文件结构（pi / omp / opencode / dsh / zcode / qoder-cn）分别匹配渠道、合并模型、更新密钥并写回校验
+
+---
+
+### navi
+
+> 创建和管理 navi 交互式 cheatsheet（.cheat/.cheat.md）：支持变量 `<var>`、动态候选 `$ var:`、依赖继承 `@`、多行 snippet 与 fzf 选项定制。
+
+- **触发场景**：创建、修改、验证、分享 cheatsheet；为 CLI/工具生成可交互命令模板
+- **路径**：`skills/navi/`
+- **依赖**：`python3`（校验）；`navi` + `fzf`/`skim`（预览/交互）
+
+**特性：**
+
+- 完整 cheatsheet 语法（`%` tags / `#` 描述 / `$` 变量 / `@` 继承 / `;` 元注释 / Markdown 代码块）与 `src/parser.rs` 解析规则对齐
+- `scripts/validate.py` 校验：tags/描述/命令完整性、`<var>` 与 `$` 一致性（含 `@` 继承）、`---` 选项合法性、续行与 Markdown 块闭合、重复去重
+- 按需加载 `references/`（syntax / variables / paths / examples）与 `assets/templates/` 模板
+
+**用法：**
+
+```bash
+# 从模板新建
+cp skills/navi/assets/templates/basic.cheat /tmp/my.cheat
+# 编辑后校验
+python3 skills/navi/scripts/validate.py /tmp/my.cheat
+# 预览（需 navi）
+navi --path "/tmp" --query "关键词"
+```
 
 ---
 

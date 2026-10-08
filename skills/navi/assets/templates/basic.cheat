@@ -1,0 +1,6 @@
+% git, code
+
+# 切换分支
+git checkout <branch>
+
+$ branch: git branch | awk '{print $NF}'
