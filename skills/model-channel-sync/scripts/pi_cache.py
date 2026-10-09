@@ -34,7 +34,7 @@ CACHE_PATH = os.path.expanduser('~/.cache/model-channel-sync/pi-models.json')
 # 中转站 vendor 名单（不区分大小写）：pi 模型条目 vendor 字段命中（或渠道 key 命中，兜底）时，
 # 该渠道按 no_models_api 方式处理——/models 可读但模型列表与 pi 不一一对应（聚合/改名），
 # 同步时直接以 pi 写死的模型列表为准（不做实时失效过滤），参数值仍从缓存原装数据取
-FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia')
+FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia', 'anyapi')
 
 
 def _is_relay(pname, pdata):
@@ -68,16 +68,27 @@ def refresh():
     return data
 
 
+def is_text_model(m):
+    """文本能力判定：pi 模型条目 input 缺省默认 ["text"]（视为文本模型）；
+    input 存在时必须包含 "text"（视觉模型 ["text","image"] 同样保留），
+    纯 image/ocr 等不支持文本输入的模型返回 False。"""
+    inp = m.get('input')
+    return True if inp is None else 'text' in inp
+
+
 def filter_models(cached, pname, items):
-    """同步时模型过滤：/models 可读的渠道剔除实时列表中已不存在的模型（模型已失效不添加）；
-    无 /models 接口的渠道（no_models_api）原样返回（以 pi 写死列表为准）。
+    """同步时模型过滤：①/models 可读的渠道剔除实时列表中已不存在的模型（模型已失效不添加）；
+    ②剔除不支持文本输入的模型（input 存在且不含 text，如纯 image/ocr 模型）；
+    无 /models 接口的渠道（no_models_api）不做失效过滤（以 pi 写死列表为准）。
     返回 (过滤后 items, 剔除的模型 id 列表)。"""
     live = (cached.get('models_api') or {}).get(pname)
-    if live is None:
-        return items, []  # 无 /models 接口渠道或无记录 → 不过滤
-    live = set(live)
-    dropped = [m['id'] for m in items if m.get('id') not in live]
-    return [m for m in items if m.get('id') in live], dropped
+    if live is not None:
+        live = set(live)
+        items = [m for m in items if m.get('id') in live]
+    dropped = [m['id'] for m in items if not is_text_model(m)]
+    if dropped:
+        items = [m for m in items if is_text_model(m)]
+    return items, dropped
 
 
 def _extract():

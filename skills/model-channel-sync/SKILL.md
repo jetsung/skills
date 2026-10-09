@@ -10,7 +10,7 @@ description: >-
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.1.0"
+  version: "1.3.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -69,7 +69,7 @@ metadata:
 | omp (Oh My Pi) | `~/.omp/agent/models.yml` | `references/omp.md` |
 | opencode | `~/.config/opencode/opencode.json` | `references/opencode.md` |
 | mimocode | `~/.config/mimocode/mimocode.jsonc` | `references/mimocode.md` |
-| dsh (DeepSeek Harness) | `~/.dsh/settings.yaml` | `references/dsh.md` |
+| dsh (DeepSeek Harness) | `~/.dsh/profiles/web/cordis.patch.yml`（profile patch 层） | `references/dsh.md` |
 | zcode | `~/.zcode/v2/provider_config.json` | `references/zcode.md` |
 | qoder | `~/.qoder/settings.json`（国外版）与 `~/.qoder-cn/settings.json`（国内版） | `references/qoder.md` |
 | codebuddy | `~/.codebuddy/models.json` | `references/codebuddy.md` |
@@ -78,11 +78,11 @@ metadata:
 
 > 默认查询/提取只需渠道+筛选方式，写入配置时才确认目标工具。
 > qoder 是同一软件的国外版（`~/.qoder`）与国内版（`~/.qoder-cn`），结构相同；**按目录存在情况同步，都存在则都同步**。
-> 注意：dsh 的渠道配置不来自 pi 的 `models.json`，读取 baseUrl/apiKey 应以 `~/.dsh/settings.yaml` 为准；zcode 同理。
+> 注意：dsh 的渠道配置不来自 pi 的 `models.json`，读取 baseUrl/apiKey 应以 `~/.dsh/profiles/<profile>/cordis.patch.yml`（默认 profile 为 `web`）为准；zcode 同理。
 
 ## 依赖
 
-- 目标渠道的 `baseUrl` 与 `apiKey`（通常从 pi 配置文件读取；若写入目标是 dsh，则从 `~/.dsh/settings.yaml` 读取）
+- 目标渠道的 `baseUrl` 与 `apiKey`（通常从 pi 配置文件读取；若写入目标是 dsh，则从 `~/.dsh/profiles/<profile>/cordis.patch.yml` 读取渠道 `baseURL` 与 `apiKeyEnv`，**再按 `apiKeyEnv` 取环境变量实值**——dsh 的 patch 文件不含明文密钥）
 - `curl` 和 `python3`
 
 ## pi 数据缓存（一次提取并验证，多平台共用）
@@ -95,6 +95,7 @@ metadata:
   - **可用但无 /models 接口**（HTTP 405、端点不返回 data 列表等）→ 记入 `no_models_api` 列表；同步时**直接以 pi 写死的模型列表为准**，不做实时过滤
   - **中转站渠道**（`pi_cache.py` 的 `FORCE_NO_MODEL_FILTER`，当前为 openrouter、nvidia）：判定依据是 pi 模型条目的 **`vendor` 字段值（不区分大小写）** 命中名单（渠道 key 命中也兜底生效），如某渠道模型的 `vendor` 为 `Openrouter` 即视为中转站。此类渠道 `/models` 可读但模型列表与 pi 不一一对应（聚合/改名），**按 no_models_api 方式处理**——同步时直接以 pi 写死的模型列表为准（不做失效过滤），**参数值（contextWindow/maxTokens/input 等）仍从缓存原装数据取**
 - **模型失效过滤**：同步时 `/models` 可读的渠道只添加实时列表中仍存在的模型——pi 有但实时缓存中已不存在的模型**不添加**（`pi_cache.filter_models`，剔除的在报告中注明）
+- **只同步文本模型**：pi 模型条目 `input` 字段缺省默认 `["text"]`（视为文本模型）；`input` 存在时必须包含 `text` 才同步——`["text","image"]` 的视觉模型照常同步，纯 `image`/`ocr` 等不支持文本输入的模型**不同步**（`pi_cache.is_text_model`，剔除的在报告中注明）。上游免费模型提取（`fetch_free.py`）同步剔除 id 含 `ocr` 的模型
 - **数据权威顺序**：渠道与模型**以 pi 为准**（哪些渠道、哪些模型），但**数据内容以缓存为准**（缓存是检查后的快照：不可用渠道已被剔除、失效模型已被标记）
 - **原装数据**：可用渠道的 providers 段原样保存（含 contextWindow/maxTokens/input/cost 等，不裁剪），支持参数的平台直接取用
 - **失效策略**：pi 文件 mtime 变化即重新提取（**重新做渠道检查**）；`PI_CACHE_TTL`（秒）强制过期重提；`python3 scripts/pi_cache.py` 手动刷新并查看检查结果（可用/不可用/无 /models 接口渠道清单）
@@ -108,7 +109,7 @@ metadata:
 | omp (Oh My Pi) | https://omp.sh/docs/custom-models |
 | opencode | https://opencode.ai/docs/models 、https://opencode.ai/docs/providers |
 | mimocode | https://mimo.xiaomi.com/mimocode/config.json （schema） |
-| dsh（DeepSeek Harness） | https://deepseek-harness.github.io/deepseek-harness/guide/providers |
+| dsh（DeepSeek Harness） | https://deepseek-harness.github.io/deepseek-harness/guide/providers ；中文源：https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.zh.md （字段全集见 config-catalog 的 `dsh-llm-pi-ai`/`PiAiCompatProfile`） |
 | zcode | GitHub 源码：https://github.com/zai-org/ZCode （schema 入口：`packages/provider/src/config/provider-data-schema.ts`、`packages/provider/src/config/rule-data-schema.ts`、`packages/shared/src/model-config.ts`） |
 | qoder | —（providers 段为 BYOK 存储，以 `references/qoder.md` 为准） |
 | codebuddy | https://www.codebuddy.cn/docs/cli/models |
@@ -120,7 +121,7 @@ metadata:
 ### 第 1 步：读取渠道配置
 
 - **pi**：从 `~/.pi/agent/models.json` 读取 `baseUrl` 和 `apiKey`；`apiKey` 形如 `!echo -n "$ENV_VAR"`，需解析出环境变量名并取值（详见 `references/pi.md`）
-- **dsh**：从 `~/.dsh/settings.yaml` 读取 `llm-pi-ai.providers.{渠道}` 的 `baseURL` 与 `apiKeyEnv`（详见 `references/dsh.md`）
+- **dsh**：从 `~/.dsh/profiles/<profile>/cordis.patch.yml` 读取——顶层是 Cordis patch **数组**，先按 `id == 'llm-pi-ai'` 定位条目，再取 `config.providers.{渠道}` 的 `baseURL` 与 `apiKeyEnv`，密钥经 `apiKeyEnv` 取环境变量实值（**文件内无明文密钥**，详见 `references/dsh.md`）
 - **zcode**：从 `~/.zcode/v2/provider_config.json` 读取渠道 `config.api.baseUrl` 与 `config.access.apiKey`（明文；详见 `references/zcode.md`）
 - **qoder**：从 `~/.qoder/settings.json`（或 `~/.qoder-cn`）读取 `providers.{渠道key}` 的 `baseUrl` 与 `apiKey`（明文；详见 `references/qoder.md`）
 
@@ -240,7 +241,7 @@ done
 | omp | `references/omp.md` | `providers.{渠道}.models` YAML 列表 `{id, name}` | env 变量名**裸形式**（不带 `$`），保留 omp 现有引用（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY`，不可覆盖） |
 | opencode | `references/opencode.md` | `provider.{渠道}.models` 对象 map（key=id，value `{id, name, family}`）；provider 缺 `npm` 时补 `@ai-sdk/openai-compatible` | 保留 `{env:XXX}` 占位符 |
 | mimocode | `references/mimocode.md` | **不从 pi 直写**；经 opencode 中转后 `provider` 整块覆盖 | **写死明文实值**（解析 `{env:VAR}` / `!echo` 占位符） |
-| dsh | `references/dsh.md` | `llm-pi-ai.providers.{渠道}.models` 列表仅 `id` | 保留 `apiKeyEnv` 变量名 |
+| dsh | `references/dsh.md` | patch 条目 `id: llm-pi-ai` → `config.providers.{渠道}.models` 列表仅 `id` | **不写密钥**：只用 `apiKeyEnv` 引用环境变量（明文另有 `.credentials.yaml`，见下） |
 | zcode | `references/zcode.md` | 规则式（`personalModelIds`/`modelOrder` + `providerModelRules`） | **写死明文实值**（不支持 env 引用） |
 | qoder | `references/qoder.md` | `providers.{qoder-custom-{UUID}}.models` 数组（id 字段名为 `model`） | **写死明文实值**（渠道顶层） |
 | codebuddy | `references/codebuddy.md` | 扁平 models 数组（无渠道层级，每模型独立条目） | **写死明文实值**（现有 `${VAR}` 条目一并转换） |
@@ -258,7 +259,7 @@ done
 
 ```bash
 python3 scripts/sync-pi-to-opencode.py
-python3 scripts/sync-pi-to-dsh.py
+python3 scripts/sync-pi-to-dsh.py              # 默认 profile=web；--profile <名> / --dry-run
 python3 scripts/sync-pi-to-omp.py
 python3 scripts/sync-pi-to-zcode.py
 python3 scripts/sync-pi-to-qoder.py
@@ -311,7 +312,8 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
 - 不要只依赖 `free` 标签，若渠道提供定价字段，用价格=0 判断更完整；渠道没有定价字段时要退化到 `free-tag`/`keyword` 并明确告知用户。
 - 不要跳过连通性测试，很多"免费"模型实际不可用；报告给用户的免费清单必须是**实测可用**的，不可用的一律列入剔除原因。
 - 各工具结构差异易错点：
-  - dsh 的 models 元素只含 `id`，路径是 `llm-pi-ai.providers.{渠道}`（`baseURL` 全大写），不要与 pi 的 `providers.{渠道}` 混淆
+  - dsh 的 models 元素只含 `id`，路径是 Cordis patch 数组中 `id: llm-pi-ai` 条目的 `config.providers.{渠道}`（`baseURL` 全大写），**顶层是列表不是映射**，不要与 pi 的 `providers.{渠道}` 混淆；patch 文件含文件头注释与其它无关条目，**只能文本级增量插入，禁止 `yaml.safe_dump` 整篇重写**
+  - **dsh 不写明文密钥**：provider 凭据字段是 `apiKeyEnv`（环境变量名），明文存 `$DSH_HOME/.credentials.yaml`（0600），patch 里**不应出现** `apiKey:` 明文；密钥缺失报 `MISSING_CREDENTIAL` 时走「模型页重存密钥」或「导出环境变量」，不要把明文写进 patch。同步脚本只动 `models`，不读不写任何密钥值
   - zcode 的 `access.apiKey`/qoder 的顶层 `apiKey` 均为**明文实值**，不支持任何 env 引用形式；zcode 渠道条目与模型条目字段集合**固定**，不可添加额外字段
   - qoder 的 id 字段名为 `model`（非 pi/dsh 的 `id`），`baseUrl` 顶层小写 l；渠道 key 为 `qoder-custom-{UUID}`，每渠道独立 provider + 独立密钥 + 独立模型
   - omp 的 `apiKey` 是 env 变量名裸形式（不带 `$`），与 pi 的 `!echo -n "$VAR"`、opencode 的 `{env:XXX}` 均不同
@@ -321,4 +323,6 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
 - 同步/写入前先做幂等核对（缺失比对），0 缺失时无写入，避免无意义重写文件；写回前备份、写回后对比备份断言只动了目标字段。
 - 写入明文密钥后报告**绝不回显密钥内容**，只报告长度/变化状态。
 - 写入明文密钥的配置文件（zcode/qoder/codebuddy/dbx/mimocode）切勿提交到版本库。
+- dsh / pi / opencode / omp 只写密钥引用（环境变量名），明文另有存放——dsh 在 `$DSH_HOME/.credentials.yaml`，
+  该文件含明文密钥，同样切勿提交或外发；patch 与 settings 文件本身不含明文，可正常入库。
 - **dbx 是 SQLite 数据库而非配置文件**：写库前先退出 DBX 应用（避免写锁与运行时覆盖）；写库前自动备份 `dbx.db.bak-YYYYMMDD`；数据目录定位（`DBX_DATA_DIR` 或平台默认路径）见 `references/dbx.md`；`is_default` 一律不改动，默认配置由用户在 DBX 设置中手动指定。

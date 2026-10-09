@@ -187,23 +187,27 @@ bak = json.load(open(ZC_PATH + '.bak-' + stamp))
 bcfg, ccfg = bak['config'], zc['config']
 b_rules = {r['providerId']: r for r in bcfg['providerConfigRules']['providerRules']}
 c_rules = {r['providerId']: r for r in ccfg['providerConfigRules']['providerRules']}
-# 新增渠道的字段集合必须与既有条目一致（无额外字段）
+# 新增渠道的字段集合必须与既有条目一致（无额外字段）；既有条目由后备对比断言保证未被改动
 PROTO_KEYS = {'group', 'access', 'api', 'personalModelIds', 'modelOrder'}
 for pid, r in c_rules.items():
+    if pid in b_rules:
+        continue
     assert set(r.keys()) == {'providerId', 'providerName', 'config'}, f'{pid}: 渠道条目字段不符'
     assert set(r['config'].keys()) == PROTO_KEYS, f'{pid}: 渠道 config 含额外字段 {set(r["config"]) - PROTO_KEYS}'
     assert set(r['config']['access'].keys()) == {'type', 'apiKey'}, f'{pid}: access 字段不符'
     assert set(r['config']['api'].keys()) == {'type', 'baseUrl'}, f'{pid}: api 字段不符'
     assert r['config']['personalModelIds'] == r['config']['modelOrder'], f'{pid}: personalModelIds 与 modelOrder 不一致'
-for mid_r in ccfg['modelConfigRules']['providerModelRules']:
+b_map = {(m['modelId'], m['providerId']): m for m in bcfg['modelConfigRules']['providerModelRules']}
+c_map = {(m['modelId'], m['providerId']): m for m in ccfg['modelConfigRules']['providerModelRules']}
+# zcode 应用会给既有模型条目补 properties/optionSpecs 等字段，固定字段集合只约束本次新增条目
+for k, mid_r in c_map.items():
+    if k in b_map:
+        continue
     assert set(mid_r.keys()) == {'modelId', 'config', 'providerId'}, '模型条目字段不符'
     assert set(mid_r['config'].keys()) == {'enabled'} and mid_r['config']['enabled'] is True, \
         f'{mid_r["modelId"]}: 模型 config 含额外字段'
 assert set(bcfg['providerOrder']) <= set(ccfg['providerOrder']), 'providerOrder 有删除'
-assert {(m['modelId'], m['providerId']) for m in bcfg['modelConfigRules']['providerModelRules']} <= \
-    {(m['modelId'], m['providerId']) for m in ccfg['modelConfigRules']['providerModelRules']}, 'providerModelRules 有删除'
-b_map = {(m['modelId'], m['providerId']): m for m in bcfg['modelConfigRules']['providerModelRules']}
-c_map = {(m['modelId'], m['providerId']): m for m in ccfg['modelConfigRules']['providerModelRules']}
+assert set(b_map.keys()) <= set(c_map.keys()), 'providerModelRules 有删除'
 for k, v in b_map.items():
     assert c_map.get(k) == v, f'{k}: 现有模型条目被改动'
 # 渠道条目：只允许 apiKey 变化与 personalModelIds/modelOrder 追加

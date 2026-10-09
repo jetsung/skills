@@ -25,8 +25,8 @@ BASE = {
     'openrouter': ('https://openrouter.ai/api/v1', 'OPENROUTER_API_KEY'),
     'anyapi':     ('https://api.anyapi.ai/v1', 'ANYAPI_API_KEY'),
 }
-# 剔除的模型关键词（图像/视频/音频类，不适合编程对话）
-EXCLUDE = ('lyria', 'image', 'video', 'whisper', 'tts')
+# 剔除的模型关键词（图像/OCR/视频/音频类，不支持文本输入或不适合编程对话）
+EXCLUDE = ('lyria', 'image', 'ocr', 'video', 'whisper', 'tts')
 # 上下文门槛：context 存在时必须大于该值
 MIN_CONTEXT = 100_000
 # 更新时间门槧：最近一年
