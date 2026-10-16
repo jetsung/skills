@@ -10,7 +10,7 @@ description: >-
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -90,7 +90,8 @@ metadata:
 各 `sync-pi-to-*.py` 脚本**不直接读 pi**，也不各自做渠道检查，而是统一经 `scripts/pi_cache.py` 读取缓存 `~/.cache/model-channel-sync/pi-models.json`。**缓存即检查结果**——渠道可用性验证在缓存生成时一次性完成：
 
 - **提取即检查**：生成缓存时对每个渠道调 `GET {baseUrl}/models`（apiKey 从 pi 解析为实值）：
-  - **渠道不通**（鉴权失败/连接失败/响应异常）→ 该渠道**不写入缓存**；同步脚本从缓存取数时自然跳过此渠道，不创建 provider、不写密钥、不合并模型
+  - **渠道不通**（鉴权失败/连接失败/响应异常，**不含 HTTP 429 限流**）→ 该渠道**不写入缓存**；同步脚本从缓存取数时自然跳过此渠道，不创建 provider、不写密钥、不合并模型
+  - **HTTP 429 限流**（`Too Many Requests` / `rate limit`）→ **视为可用**（临时限额，模型/渠道存在，按可用渠道处理）
   - **可用且 /models 返回模型列表** → 原装数据入缓存，并记入 `models_api[渠道] = [实时模型 id 列表]`
   - **可用但无 /models 接口**（HTTP 405、端点不返回 data 列表等）→ 记入 `no_models_api` 列表；同步时**直接以 pi 写死的模型列表为准**，不做实时过滤
   - **中转站渠道**（`pi_cache.py` 的 `FORCE_NO_MODEL_FILTER`，当前为 openrouter、nvidia）：判定依据是 pi 模型条目的 **`vendor` 字段值（不区分大小写）** 命中名单（渠道 key 命中也兜底生效），如某渠道模型的 `vendor` 为 `Openrouter` 即视为中转站。此类渠道 `/models` 可读但模型列表与 pi 不一一对应（聚合/改名），**按 no_models_api 方式处理**——同步时直接以 pi 写死的模型列表为准（不做失效过滤），**参数值（contextWindow/maxTokens/input 等）仍从缓存原装数据取**
@@ -175,22 +176,25 @@ for m in free_models:
 
 ### 第 4 步：连通性测试
 
-对筛选出的每个候选模型逐个调用 chat/completions 接口实测，剔除不可用：
+对筛选出的每个候选模型逐个调用 chat/completions 接口实测，剔除不可用（**HTTP 429 限流视为可用**）：
 
 ```bash
 for mid in "候选1" "候选2"; do
   echo "=== $mid ==="
-  curl -s "$BASE_URL/chat/completions" \
+  # -w "%{http_code}" 取状态码；429 限流视为可用（模型存在，临时限额）
+  code=$(curl -s -o /tmp/resp.json -w "%{http_code}" "$BASE_URL/chat/completions" \
     -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-    -d "{\"model\":\"$mid\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":5}"
+    -d "{\"model\":\"$mid\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":5}")
+  if [ "$code" = "429" ]; then echo "可用（429 rate-limited，临时限额）"; cat /tmp/resp.json; else cat /tmp/resp.json; fi
   echo
 done
 ```
 
 **解读响应（重要）：**
 - 有 `choices` 且 `message.content` 或 `message.reasoning` 有值 → **可用**（推理模型 content 为 null 但 reasoning 有值也算可用）
+- HTTP 429（`rate limit` / `Too Many Requests` / `inference exceeds tpm/rpm limit`）→ **可用**（临时限额/限流，模型存在，仅需限频后重试；不得剔除）
 - `error.message` 含 "not available in your region" → **地区限制，不可用**
-- `error` 表示鉴权失败 / 上游错误 → **不可用**
+- `error` 表示鉴权失败 / 上游错误 → **不可用**（如 401/403/404/503 等；**429 除外**）
 - 音频/视频模型（如 `google/lyria-*`）通常受地区限制且不适合编程，直接标不可用
 
 ### 第 5 步：输出报告
@@ -316,7 +320,7 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
   - **dsh 不写明文密钥**：provider 凭据字段是 `apiKeyEnv`（环境变量名），明文存 `$DSH_HOME/.credentials.yaml`（0600），patch 里**不应出现** `apiKey:` 明文；密钥缺失报 `MISSING_CREDENTIAL` 时走「模型页重存密钥」或「导出环境变量」，不要把明文写进 patch。同步脚本只动 `models`，不读不写任何密钥值
   - zcode 的 `access.apiKey`/qoder 的顶层 `apiKey` 均为**明文实值**，不支持任何 env 引用形式；zcode 渠道条目与模型条目字段集合**固定**，不可添加额外字段
   - qoder 的 id 字段名为 `model`（非 pi/dsh 的 `id`），`baseUrl` 顶层小写 l；渠道 key 为 `qoder-custom-{UUID}`，每渠道独立 provider + 独立密钥 + 独立模型
-  - omp 的 `apiKey` 是 env 变量名裸形式（不带 `$`），与 pi 的 `!echo -n "$VAR"`、opencode 的 `{env:XXX}` 均不同
+  - omp 的 `apiKey` 是 env 变量名裸形式（不带 `$`），与 pi 的 `!echo -n "$VAR"`、opencode 的 `{env:XXX}` 均不同；`baseUrl` 必须是**明文 URL**（omp 不解析 `{env:...}` 占位符，那是 opencode 语法）；pi 中存在但 omp 无对应的渠道**自动创建 provider**（`baseUrl` 明文、`api` 从 pi、`apiKey` 从 pi 的 `!echo -n "$VAR"` 提取 env 变量名裸形式）
   - zcode 的 `api.type: anthropic-messages` 渠道无 `/models` 端点，模型列表从 `personalModelIds` 读取
 - **mimocode 走 opencode 中转，不做 pi 直写映射**；`sync-pi-to-mimocode.py` 必须先跑完 `sync-pi-to-opencode.py` 再覆盖。覆盖是**整块替换 provider**（只增不删规则对 mimocode 不适用）；**密钥必须明文**——`{env:VAR}`/`!echo` 占位符写入前解析为实值（优先级：env 实值 > 目标已有明文 > 空；与 zcode/qoder 同级）。`mimocode.jsonc` 可能含注释/尾逗号，解析须走 JSONC 宽容读取（脚本已内置）。
 - 环境变量名正则须含数字（`[A-Z0-9_]+`）；长脚本用 heredoc/独立脚本文件传给 python3，**不要用 bash 双引号 `-c "..."`**（会吞掉 `\$`/`\"` 转义导致正则失效）。

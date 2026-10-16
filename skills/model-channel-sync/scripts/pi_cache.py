@@ -34,7 +34,7 @@ CACHE_PATH = os.path.expanduser('~/.cache/model-channel-sync/pi-models.json')
 # 中转站 vendor 名单（不区分大小写）：pi 模型条目 vendor 字段命中（或渠道 key 命中，兜底）时，
 # 该渠道按 no_models_api 方式处理——/models 可读但模型列表与 pi 不一一对应（聚合/改名），
 # 同步时直接以 pi 写死的模型列表为准（不做实时失效过滤），参数值仍从缓存原装数据取
-FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia', 'anyapi')
+FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia', 'anyapi', 'cli2api')
 
 
 def _is_relay(pname, pdata):

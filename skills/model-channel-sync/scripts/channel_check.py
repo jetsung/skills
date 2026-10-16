@@ -76,7 +76,7 @@ def skip_reason(pname, pdata):
 
 
 def _probe(base_url, api_key, timeout):
-    """实际请求 GET {baseUrl}/models 判定可用性。"""
+    """实际请求 GET {baseUrl}/models 判定可用性。429 限流视为可用（临时限额，渠道存在）。"""
     if not base_url:
         return {'ok': False, 'reason': 'baseUrl 为空'}
     url = base_url.rstrip('/') + '/models'
@@ -98,6 +98,14 @@ def _probe(base_url, api_key, timeout):
         # 405 = 端点存在但不支持 GET（如仅 POST 的网关）→ 渠道本身可达，视为可用
         if e.code == 405:
             return {'ok': True, 'reason': '端点可达（不支持 GET /models）'}
+        # 429 = 限流/临时限额 → 渠道/模型存在，视为可用（不得剔除）
+        if e.code == 429:
+            detail = ''
+            try:
+                detail = e.read().decode('utf-8', 'replace')[:120]
+            except Exception:
+                pass
+            return {'ok': True, 'reason': f'429 限流（可用，临时限额）{(": " + detail) if detail else ""}'}
         detail = ''
         try:
             detail = e.read().decode('utf-8', 'replace')[:120]

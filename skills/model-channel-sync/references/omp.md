@@ -136,7 +136,9 @@ providers:
 - 只写全局 `~/.omp/agent/models.yml`，禁止项目级
 - `models` 是 YAML 列表，元素 `{id, name}` 起步，有数据时补 `reasoning`/`input`/`contextWindow`/`maxTokens`/`cost`
 - `apiKey` 用 env 变量名裸形式（omp 的解析规则），同步保留 omp 现有引用（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY`，不可覆盖）
-- `baseURL`/`api` 等渠道字段：已有值不动，缺失/为空才从 pi 补入
+- `baseUrl` 明文 URL（非环境变量引用、非 `{env:...}` 占位符——那是 opencode 语法，omp 不认）
+- `api`/`baseUrl` 等渠道字段：已有值不动，缺失/为空才从 pi 补入
+- pi 中存在但 omp 无对应的渠道：自动创建 provider（`baseUrl` 明文、`api` 从 pi、`apiKey` 从 pi 的 `!echo -n "$VAR"` 提取 env 变量名裸形式）
 - 写回后用 `python3 -c "import yaml;yaml.safe_load(open(...))"` 校验
 
 ## 全量同步脚本
@@ -145,4 +147,4 @@ providers:
 python3 scripts/sync-pi-to-omp.py
 ```
 
-目标配置：`~/.omp/agent/models.yml`；models 格式为列表 `{id, name}`；apiKey 保留 `!echo` 占位符（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖）。幂等可重复执行，自动备份+断言校验。
+目标配置：`~/.omp/agent/models.yml`；models 格式为列表 `{id, name}`；apiKey 为 env 变量名裸形式（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖）；pi 中存在但 omp 无对应的渠道自动创建 provider（`baseUrl` 明文、`apiKey` 从 pi 的 `!echo -n "$VAR"` 提取 env 变量名）。幂等可重复执行，自动备份+断言校验。

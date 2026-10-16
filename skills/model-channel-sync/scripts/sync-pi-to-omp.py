@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""pi → omp 同步（合并式：保留现有 + 补 pi 缺失模型）。
+"""pi → omp 同步（合并式：保留现有 + 补 pi 缺失模型；pi 新渠道自动创建 provider）。
 
 用法:
     python3 scripts/sync-pi-to-omp.py
 
-omp 的 apiKey 为 !echo 环境变量占位符（env 名可能与 pi 不同，如 kilo 用
-NVIDIA_API_KEY 而 pi 用 KILO_API_KEY），保留不动，避免破坏连接；只同步
-models（YAML 列表，元素 {id, name}）。pi 条目提供 contextWindow/maxTokens 限制时，
-新增条目一并写入，现有条目不一致即同步更新（来源为权威值）。
-幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增与限制字段同步；密钥不回显。
+omp 的 apiKey 为环境变量名裸形式（env 名可能与 pi 不同，如 kilo 用
+NVIDIA_API_KEY 而 pi 用 KILO_API_KEY），已有 provider 保留不动，避免破坏连接；
+pi 中存在但 omp 无对应的渠道自动创建 provider（baseUrl 明文、apiKey 从 pi 的
+!echo -n "$VAR" 提取 env 变量名）。只同步 models（YAML 列表，元素 {id, name}）。
+pi 条目提供 contextWindow/maxTokens 限制时，新增条目一并写入，现有条目不一致即同步更新
+（来源为权威值）。幂等可重复执行；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增、
+限制字段同步、空值补充与新渠道创建；密钥不回显。
 """
 import json, re, os, shutil, datetime, sys
 import yaml
@@ -38,15 +40,27 @@ for pname, pdata in pi['providers'].items():
     else:
         key = {norm(k): k for k in providers}.get(norm(pname))
     if key is None:
-        out.append(f'跳过 {pname}: omp 无对应 provider')
-        continue
-    prov = providers[key]
-    if not prov.get('baseUrl'):  # 规则：不更新已有值，仅空值补充
-        prov['baseUrl'] = pdata.get('baseUrl', '')
-        out.append(f'{pname}: baseUrl 空值补充')
-    if not prov.get('api'):
-        prov['api'] = pdata.get('api', 'openai-completions')
-        out.append(f'{pname}: api 空值补充')
+        # pi 中存在但 omp 无对应渠道 → 自动创建 provider
+        # baseUrl 明文、api 从 pi 取、apiKey 从 pi 的 !echo -n "$VAR" 提取 env 变量名（omp 裸形式）
+        m = re.match(r'!echo -n "\$([A-Z0-9_]+)"', pdata.get('apiKey', ''))
+        env_name = m.group(1) if m else pdata.get('apiKey', '')
+        prov = {
+            'baseUrl': pdata.get('baseUrl', ''),
+            'api': pdata.get('api', 'openai-completions'),
+            'apiKey': env_name,
+            'models': []
+        }
+        providers[pname] = prov
+        key = pname
+        out.append(f'{pname}: 新建 provider（baseUrl 明文, apiKey: {env_name}）')
+    else:
+        prov = providers[key]
+        if not prov.get('baseUrl'):  # 规则：不更新已有值，仅空值补充
+            prov['baseUrl'] = pdata.get('baseUrl', '')
+            out.append(f'{pname}: baseUrl 空值补充')
+        if not prov.get('api'):
+            prov['api'] = pdata.get('api', 'openai-completions')
+            out.append(f'{pname}: api 空值补充')
     models = prov.setdefault('models', [])
     existing = {m['id'] for m in models if isinstance(m, dict)}
     added = []
@@ -83,8 +97,11 @@ with open(OMP_PATH, 'w') as f:
 
 bak = yaml.safe_load(open(OMP_PATH + '.bak-' + stamp))
 bprov, cprov = bak['providers'], providers
-assert list(bprov.keys()) == list(cprov.keys()), 'provider 键序被改动'
+assert list(bprov.keys()) == list(cprov.keys())[:len(bprov)], 'provider 键序被改动（已有键顺序变化）'
+assert set(bprov.keys()) <= set(cprov.keys()), '已有 provider 被删除'
 for k in cprov:
+    if k not in bprov:
+        continue  # 新建 provider 不做后备对比断言
     bm = [m for m in bprov[k].get('models', []) if isinstance(m, dict)]
     cm = [m for m in cprov[k].get('models', []) if isinstance(m, dict)]
     bidx = {m['id']: m for m in bm}
@@ -109,5 +126,5 @@ for k in cprov:
             assert cprov[k].get(kk) == vv or (not vv and cprov[k].get(kk)), f'{k}: {kk} 被改动（已有值）'
         else:
             assert cprov[k].get(kk) == vv, f'{k}: 字段 {kk} 被改动'
-print('校验通过：仅 models 新增 / 限制字段同步')
+print('校验通过：仅 models 新增 / 限制字段同步 / 空值补充 / 新渠道创建')
 print('\n'.join(out))
