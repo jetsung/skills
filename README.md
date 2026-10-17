@@ -3,7 +3,6 @@
 通用的 AI 编程助手 Skills 集合，适用于支持 Skills 的 AI 工具或自定义 Agent 框架。
 
 ## 目录
-
 - [项目简介](#项目简介)
 - [Skills 列表](#skills-列表)
   - [git-commit-me](#git-commit-me)
@@ -13,6 +12,7 @@
   - [incremental-translation](#incremental-translation)
   - [model-channel-sync](#model-channel-sync)
   - [navi](#navi)
+  - [just](#just)
   - [update-gh-action-version](#update-gh-action-version)
 - [安装](#安装)
 - [添加新 Skill](#添加新-skill)
@@ -170,9 +170,38 @@ python3 skills/navi/scripts/validate.py /tmp/my.cheat
 navi --path "/tmp" --query "关键词"
 ```
 
+### just
+
+> `just` 命令运行器：基于 `justfile` 管理项目级配方（recipes），支持参数、依赖、导入/模块、环境与 dotenv、shell/shebang/script 及完整 CLI。
+
+- **触发场景**：编写或执行 `justfile`、管理配方与依赖、配置 shell/环境变量、使用模块与导入、查询 `just` CLI/设置/属性/函数
+- **路径**：`skills/just/`
+- **依赖**：`just` 二进制（`cargo install just` 等）；`python3`（仅更新文档时）
+
+**特性：**
+
+- `SKILL.md` 精简指令 + 按需加载 `references/`（syntax / expressions / execution / organization / cli-and-settings）
+- 去噪后的上游快照 `references/raw.md`（保留更新 URL），配合 `scripts/update.py` 一键刷新（直连 → GitHub API → `https://filetas.asfd.cn` 代理，`IS_CHINA=1` 自动走代理）
+- 覆盖配方、参数、依赖、属性、设置、函数、缓存、信号、格式化等完整能力
+
+**用法：**
+
+```bash
+# 列出/执行配方
+just --list
+just <recipe> [args]
+
+# 格式化
+just --fmt
+
+# 更新上游文档快照
+python3 skills/just/scripts/update.py --check
+python3 skills/just/scripts/update.py
+```
+
 ---
 
-### update-gh-action-version
+ ### update-gh-action-version
 
 > 自动检测并更新 GitHub Actions 工作流文件中使用的 Action 版本至最新主版本。
 
