@@ -1,11 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "requests>=2.25",
+# ]
+# ///
 """
 fetch_tags.py — 获取 Flarum 标签列表并缓存到 ~/.cache/flarum/tags.json
-（Python 版，等价于上游 fetch_tags.sh）
 
 用法:
-    fetch_tags.py [--force]
+    uv run --script scripts/fetch_tags.py [--force]
 
 环境变量: FLARUM_URL (必填), FLARUM_TOKEN (必填), FLARUM_USER_ID (可选)。
 """

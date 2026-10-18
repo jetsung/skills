@@ -2,22 +2,24 @@
 
 当候选图片 >1MB 时，不直接转存，而是先用本地压缩工具尝试压到 <1MB，再转存到论坛图床；若两工具都压不下来（压缩失败或压缩后仍 ≥1MB），则回退到原图 URL（**不加代理前缀**）。
 
-## 压缩工具简介
+## 压缩工具与安装
 
-可用工具（安装脚本均托管于 `fx4.cn`）：
+三个工具均托管于 `fx4.cn` 短链，安装幂等（已安装自动跳过）：
 
-- **oxipng** — 用 Rust 编写的多线程 PNG 无损压缩优化工具（[oxipng/oxipng](https://github.com/oxipng/oxipng)）。仅支持 PNG，实测 1.32 MB PNG 可压到 812 KB，**PNG 首选**。
-- **rimage** — 用 Rust 编写的批量图片压缩/格式转换工具，支持 PNG/JPEG/WebP/AVIF（[vlad-salone/rimage](https://github.com/vlad-salone/rimage)）。通用作 oxipng 的兜底（对 PNG 反而可能变大）。
-- **resvg** — 高性能 SVG 渲染器，可将 SVG 转换为 PNG 等位图（[linebender/resvg](https://github.com/linebender/resvg)）。用于把 SVG 先渲染成 PNG，再交给 oxipng / rimage 压缩。
+| 工具 | 源码 | 用途 | 短链安装 |
+| --- | --- | --- | --- |
+| `oxipng` | [oxipng/oxipng](https://github.com/oxipng/oxipng) | Rust 多线程 PNG 无损压缩；仅支持 PNG，实测 1.32 MB → 812 KB，**PNG 首选** | `curl -fsSL https://fx4.cn/oxipng \| bash` |
+| `rimage` | [vlad-salone/rimage](https://github.com/vlad-salone/rimage) | Rust 批量图片压缩/格式转换（PNG/JPEG/WebP/AVIF）；作 oxipng 兜底，对 PNG 反而可能变大 | `curl -fsSL https://fx4.cn/rimage \| bash` |
+| `resvg` | [linebender/resvg](https://github.com/linebender/resvg) | 高性能 SVG 渲染器，SVG → PNG 后再交 oxipng/rimage 压缩 | `curl -fsSL https://fx4.cn/resvg \| bash` |
 
-## 工具安装（未安装时自动安装）
-
-运行前检查 `oxipng`、`rimage`（如涉及 SVG 再检查 `resvg`）是否已安装，缺失则用下列命令安装（安装脚本由用户托管于 `fx4.cn`）：
+一键安装全部三个（幂等，已安装自动跳过）：
 
 ```bash
-which oxipng >/dev/null 2>&1 || curl -L fx4.cn/oxipng | bash
-which rimage >/dev/null 2>&1 || curl -L fx4.cn/rimage | bash
-which resvg  >/dev/null 2>&1 || curl -L fx4.cn/resvg | bash
+for t in oxipng rimage resvg; do
+  command -v "$t" >/dev/null 2>&1 && { echo "✔ $t 已安装，跳过"; continue; }
+  echo "→ 安装 $t ..."
+  curl -fsSL "https://fx4.cn/$t" | bash
+done
 ```
 
 安装后验证：`oxipng --version`、`rimage --version`、`resvg --version` 应能正常执行。

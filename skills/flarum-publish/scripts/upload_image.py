@@ -1,20 +1,24 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "requests>=2.25",
+# ]
+# ///
 """
 upload_image.py — 转存图片到论坛图床（Flarum fof/upload 插件）
-（Python 版，等价于上游 upload_image.sh）
 
 用法:
-    upload_image.py <图片URL|本地文件> [更多...]
+    uv run --script scripts/upload_image.py <图片URL|本地文件> [更多...]
 
 示例:
-    upload_image.py https://raw.githubusercontent.com/owner/repo/main/assets/a.png
-    upload_image.py ./local.png https://example.com/b.jpg
+    uv run --script scripts/upload_image.py https://raw.githubusercontent.com/owner/repo/main/assets/a.png
+    uv run --script scripts/upload_image.py ./local.png https://example.com/b.jpg
 
 输出: 每个输入一行「<来源>\\t<论坛图床URL>」，图床地址为协议相对形式（//host/path）
-依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
-      FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
-      以上均从进程环境读取，不依赖任何 agent 私有配置文件。
+依赖: 环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、FLARUM_USER_ID（可选）、
+      IS_CHINA（可选，=1 时启用代理前缀降级）。均从进程环境读取，不依赖任何 agent 私有配置文件。
 """
 import mimetypes
 import os
@@ -141,7 +145,7 @@ def upload_one(src, env, tmp_root):
 
 
 def usage():
-    return """用法: upload_image.py [选项] <图片URL|本地文件> [更多...]
+    return """用法: uv run --script upload_image.py [选项] <图片URL|本地文件> [更多...]
 
 把图片（本地文件或远程 URL）转存到论坛图床（fof/upload），输出图床地址。
 
@@ -153,10 +157,10 @@ def usage():
 退出码: 0 全部成功；1 部分或全部失败（失败原因逐行打到 stderr）。
 
 示例:
-  upload_image.py https://raw.githubusercontent.com/owner/repo/main/assets/a.png
-  upload_image.py ./local.png https://example.com/b.jpg
+  uv run --script upload_image.py https://raw.githubusercontent.com/owner/repo/main/assets/a.png
+  uv run --script upload_image.py ./local.png https://example.com/b.jpg
 
-依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（由 PEP 723 内联声明，uv run --script 自动安装）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）、IS_CHINA（可选，=1 时启用代理前缀降级）。
       以上均从进程环境读取，无配置文件回退。
 """

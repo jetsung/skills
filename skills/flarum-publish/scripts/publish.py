@@ -1,20 +1,26 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "requests>=2.25",
+# ]
+# ///
 """
-publish.py — 发布文章到 Flarum 论坛（Python 版，等价于上游 publish.sh）
+publish.py — 发布文章到 Flarum 论坛（POST /api/discussions）
 
 用法:
-    publish.py <标题> <正文文件|-> [标签1,标签2]
+    uv run --script scripts/publish.py <标题> <正文文件|-> [标签1,标签2]
 
 示例:
-    publish.py "ZeroClaw：自托管的 Rust AI 智能体运行时" /tmp/article.md "63,86,20"
-    cat /tmp/article.md | publish.py "标题" -
+    uv run --script scripts/publish.py "ZeroClaw：自托管的 Rust AI 智能体运行时" /tmp/article.md "63,86,20"
+    cat /tmp/article.md | uv run --script scripts/publish.py "标题" -
 
 特点:
-    - 直接用 requests 调 POST /api/discussions，避免 bash 历史扩展（标题/URL 中 `!` 被改坏）这类转义问题。
+    - 用 requests 调 POST /api/discussions，避免 bash 历史扩展（标题/URL 中 `!` 被改坏）这类转义问题。
     - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 从进程环境读取，
       不依赖任何 agent 私有配置文件；缺失时脚本报错退出，由 agent 向用户索取。
-    - 标签解析与上游一致：逗号分隔的 ID / 名称 / slug 均可，纯数字视为 ID；
+    - 标签解析：逗号分隔的 ID / 名称 / slug 均可，纯数字视为 ID；
       标签缓存 ~/.cache/flarum/tags.json 不存在时自动调用 fetch_tags.py 获取。
 """
 import json
@@ -142,7 +148,7 @@ def parse_tags(tag_input):
 
 
 def usage():
-    return """用法: publish.py <标题> <正文文件|-> [标签1,标签2]
+    return """用法: uv run --script publish.py <标题> <正文文件|-> [标签1,标签2]
 
 把一篇文章发布为论坛讨论（POST /api/discussions）。
 
@@ -158,10 +164,10 @@ def usage():
 退出码: 0 成功；1 失败（环境变量缺失 / 参数无效 / HTTP 4xx/5xx，stderr 附响应详情）。
 
 示例:
-  publish.py "ZeroClaw：自托管的 Rust AI 智能体运行时" /tmp/article.md "63,86,20"
-  cat /tmp/article.md | publish.py "标题" -
+  uv run --script publish.py "ZeroClaw：自托管的 Rust AI 智能体运行时" /tmp/article.md "63,86,20"
+  cat /tmp/article.md | uv run --script publish.py "标题" -
 
-依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（由 PEP 723 内联声明，uv run --script 自动安装）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）从进程环境读取，无配置文件回退。
 """
 

@@ -1,17 +1,23 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "requests>=2.25",
+# ]
+# ///
 """
 reply.py — 在已有讨论下回帖（POST /api/posts）
 
 用法:
-    reply.py <discussion_id> <正文文件|->
+    uv run --script scripts/reply.py <discussion_id> <正文文件|->
 
 示例:
-    reply.py 1234 /tmp/tutorial.md
-    cat /tmp/tutorial.md | reply.py 1234 -
+    uv run --script scripts/reply.py 1234 /tmp/tutorial.md
+    cat /tmp/tutorial.md | uv run --script scripts/reply.py 1234 -
 
 特点:
-    - 直接用 requests 调 POST /api/posts，避免 bash 转义问题（与 publish.py 一致）。
+    - 用 requests 调 POST /api/posts，避免 bash 转义问题（与 publish.py 一致）。
     - 环境变量 FLARUM_URL / FLARUM_TOKEN / FLARUM_USER_ID 从进程环境读取，
       不依赖任何 agent 私有配置文件；缺失时脚本报错退出，由 agent 向用户索取。
 """
@@ -37,7 +43,7 @@ def load_env():
 
 
 def usage():
-    return """用法: reply.py <discussion_id> <正文文件|->
+    return """用法: uv run --script reply.py <discussion_id> <正文文件|->
 
 在已有讨论下回帖（POST /api/posts）。
 
@@ -52,10 +58,10 @@ def usage():
 退出码: 0 成功；1 失败（参数无效 / 环境变量缺失 / HTTP 4xx/5xx，stderr 附响应详情）。
 
 示例:
-  reply.py 1234 /tmp/tutorial.md
-  cat /tmp/tutorial.md | reply.py 1234 -
+  uv run --script reply.py 1234 /tmp/tutorial.md
+  cat /tmp/tutorial.md | uv run --script reply.py 1234 -
 
-依赖: requests（建议用 ~/.cache/flarum/uv 的 uv 环境）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
+依赖: requests（由 PEP 723 内联声明，uv run --script 自动安装）；环境变量 FLARUM_URL / FLARUM_TOKEN（必填）、
       FLARUM_USER_ID（可选）从进程环境读取，无配置文件回退。
 """
 

@@ -53,7 +53,7 @@
    - **检查大小**：用户选定后，用 `curl -sIL` 取 `content-length`（无则下载到本地临时文件用 `stat -c%s` 取字节数）。**≤1MB** 适合直接转存图床；**>1MB** 需先按 [references/image-compression.md](../references/image-compression.md) 压缩——尝试 `oxipng` / `rimage`，压缩后 <1MB 转存，两工具都失败则用原图 URL（不加代理前缀）。
    - 用户选定后，先转存到论坛图床再写入正文：
      ```bash
-     "$FLARUM_PY" "$SKILL_PATH/scripts/upload_image.py" "<选中的图片 URL 或本地文件>"
+     uv run --script scripts/upload_image.py "<选中的图片 URL 或本地文件>"
      # 输出: <来源>	<图床URL>
      ```
      将返回的图床地址以 `![<alt>](<图床URL>)` 格式插入正文的 `## 主要功能` 列表之后、`---` 分隔线之前。**地址保持协议相对形式 `//host/path`，不要写成 `https://host/path` 或 `http://host/path`。** 用户明确要求保留原始地址时才用原地址。
