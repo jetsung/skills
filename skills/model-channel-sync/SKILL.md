@@ -10,7 +10,7 @@ description: >-
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.4.0"
+  version: "1.5.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -254,7 +254,7 @@ done
 **共同规则：**
 - 只写**用户级（全局）**配置，**禁止修改项目级/工作区内的配置文件**（pi/omp/opencode/dsh/zcode/qoder/codebuddy 全部适用）
 - 只合并/新增模型条目，保留已有条目不变；同步为**合并式（只增不删）**，上游下架的模型不会自动移除，需清理时手动处理（**mimocode 例外**：经 opencode 覆盖，整块替换）
-- 若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时一并更新到配置文件中（字段映射见各参考文件）
+- 若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时一并更新到配置文件中（字段映射见各参考文件；渠道特定规则中注明的除外，如 Sense 渠道不写 `reasoning`/`maxTokens`）
 - 渠道级字段（baseURL/kind/compat/npm 等）：已有值不更新，仅目标缺失/为空时补入（opencode v2 的 `package` 缺失时补默认适配器 `aisdk:@ai-sdk/openai-compatible`；mimocode 的 `npm` 缺失时补 `@ai-sdk/openai-compatible`）
 
 ### 多工具全量同步（pi 为基准）
@@ -297,6 +297,7 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
 
 - **AMD 渠道全量同步**：不区分免费/付费，同步时全量写入所有模型
 - **Sense 渠道版本族精简**：只保留每个系列的最新版模型（如 `sensenova-6.7-flash-lite` 和 `sensenova-6.8-flash-lite` 只保留后者）；同系列（id 含相同前缀）按版本号排序取最高
+- **Sense 渠道参数精简**：渠道 baseUrl 为 `token.sensenova.cn` / `token.sensenova.ai`（渠道 key `sense` / `sense-ai`）时，写入 pi/omp 的模型条目**不携带 `reasoning` 与 `maxTokens` 两个参数**，pi/omp 已有条目中的这两个参数在同步/清理时一并移除；`contextWindow` 等其它参数照常（omp 侧由 `sync-pi-to-omp.py` 自动执行该精简；按 baseUrl 主机判定，勿按渠道 key 判定）
 - **模型筛选**：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道全量同步
 - **模型 displayName/name**：统一为 **`{渠道显示名} - {模型名}`** 格式（如 `NewAPI - Sense DeepSeek Latest Flash`）；模型名已含渠道名则去重（如 amd 的 `AMD DeepSeek V4 Flash` → `AMD - DeepSeek V4 Flash`）
 - **模型 id 保持 pi 原样**：不得擅自添加或去掉前缀（渠道自带前缀如 `amd/deepseek-latest-flash` 原样保留）

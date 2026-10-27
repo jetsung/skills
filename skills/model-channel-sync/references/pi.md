@@ -162,4 +162,6 @@ API_KEY="$OPENROUTER_API_KEY"
 | `input` | `input` | 输入类型，如 `["text"]` 或 `["text","image"]` |
 | `cost` | `cost` | 计费信息 `{input, output, cacheRead, cacheWrite}` |
 
+> **例外（Sense 渠道）**：渠道 baseUrl 为 `token.sensenova.cn` / `token.sensenova.ai` 时，模型条目**不写 `reasoning` 与 `maxTokens` 两个参数**，已有条目中的这两个参数在同步/清理时一并移除；`contextWindow` 等其它参数照常（见 SKILL.md 渠道特定规则）。
+
 写入时以 pi 现有配置结构为准，仅合并/新增模型条目，保留已有条目不变。文件每次打开 `/model` 时自动重载，编辑后无需重启。

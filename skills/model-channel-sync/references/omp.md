@@ -134,7 +134,8 @@ providers:
 ## 写入 omp 时的要点（汇总）
 
 - 只写全局 `~/.omp/agent/models.yml`，禁止项目级
-- `models` 是 YAML 列表，元素 `{id, name}` 起步，有数据时补 `reasoning`/`input`/`contextWindow`/`maxTokens`/`cost`
+- `models` 是 YAML 列表，元素 `{id, name}` 起步，有数据时补 `reasoning`/`input`/`contextWindow`/`maxTokens`/`cost`（**Sense 渠道例外**：不写 `reasoning`/`maxTokens`，见下）
+- **Sense 渠道参数精简**：渠道 baseUrl 为 `token.sensenova.cn` / `token.sensenova.ai` 时，模型条目**不携带 `reasoning` 与 `maxTokens`**，已有条目中的这两个参数一并移除；`contextWindow` 等其它参数照常（`sync-pi-to-omp.py` 自动执行）
 - `apiKey` 用 env 变量名裸形式（omp 的解析规则），同步保留 omp 现有引用（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY`，不可覆盖）
 - `baseUrl` 明文 URL（非环境变量引用、非 `{env:...}` 占位符——那是 opencode 语法，omp 不认）
 - `api`/`baseUrl` 等渠道字段：已有值不动，缺失/为空才从 pi 补入
@@ -147,4 +148,4 @@ providers:
 python3 scripts/sync-pi-to-omp.py
 ```
 
-目标配置：`~/.omp/agent/models.yml`；models 格式为列表 `{id, name}`；apiKey 为 env 变量名裸形式（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖）；pi 中存在但 omp 无对应的渠道自动创建 provider（`baseUrl` 明文、`apiKey` 从 pi 的 `!echo -n "$VAR"` 提取 env 变量名）。幂等可重复执行，自动备份+断言校验。
+目标配置：`~/.omp/agent/models.yml`；models 格式为列表 `{id, name}`；apiKey 为 env 变量名裸形式（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY` 而非 `KILO_API_KEY`，不可覆盖）；pi 中存在但 omp 无对应的渠道自动创建 provider（`baseUrl` 明文、`apiKey` 从 pi 的 `!echo -n "$VAR"` 提取 env 变量名）。**Sense 渠道（token.sensenova.cn / token.sensenova.ai）条目自动移除 `reasoning`/`maxTokens` 两个参数**。幂等可重复执行，自动备份+断言校验。
