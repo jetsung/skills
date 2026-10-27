@@ -10,14 +10,15 @@
     2. 再跑本脚本：从 opencode 提取 provider，**清空并整块覆盖** mimocode 的 provider
 
 行为:
-- 源: ~/.config/opencode/opencode.json 的 `provider` 对象
+- 源: ~/.config/opencode/opencode.json 的 `providers` 对象（opencode v2 格式，自动转换为
+  mimocode 形状：package→npm、settings→options、modelID→id；旧 `provider` V1 段兜底）
 - 目标: ~/.config/mimocode/mimocode.jsonc（或 mimocode.json），仅替换 `provider` 键
 - **密钥解析为明文**：mimocode 不认 opencode 的 `{env:VAR}` 占位符，写入前把
   `options.apiKey` / `options.baseURL` / `headers.*` 中的占位符解析为环境变量实值
   （支持 `{env:VAR}`、`!echo -n "$VAR"`、`"$VAR"`、`${VAR}`）；优先级：env 实值 >
   目标已有明文 > 空。运行前需在已注入密钥环境变量的 shell 中执行。
 - 非 provider 顶层字段（mcp/agent/skills 等）原样保留；`$schema` 规范为 mimocode 地址
-- provider 缺失 `npm` 时兜底补 `@ai-sdk/openai-compatible`（源已补全则原样带入），已有值不动
+- provider 缺失 `npm` 时兜底补 `@ai-sdk/openai-compatible`（转换后源已带 npm 则原样带入），已有值不动
 - 自动备份（.bak-YYYYMMDD-HHMMSS）；写后断言仅密钥字段被解析、结构与源一致
 - 密钥不回显，只报告 provider/模型计数与已解析的 env 名
 """
@@ -101,6 +102,35 @@ def resolve_mimo_path():
             if p in existing:
                 return p
     return MIMO_CANDIDATES[0]
+
+
+def oc_v2_to_mimo(providers):
+    """opencode v2 provider 块 → mimocode（V1 同构）形状：
+    package→npm（去 aisdk: 前缀）、settings→options、模型 modelID→id。"""
+    out = {}
+    for pid, cfg in providers.items():
+        if not isinstance(cfg, dict):
+            out[pid] = cfg
+            continue
+        nc = {}
+        for k, v in cfg.items():
+            if k == 'package':
+                nc['npm'] = v[len('aisdk:'):] if isinstance(v, str) and v.startswith('aisdk:') else v
+            elif k == 'settings':
+                nc['options'] = v
+            elif k == 'models':
+                nm = {}
+                for mk, mv in v.items():
+                    if isinstance(mv, dict):
+                        mv = copy.deepcopy(mv)
+                        if 'modelID' in mv:
+                            mv['id'] = mv.pop('modelID')
+                    nm[mk] = mv
+                nc['models'] = nm
+            else:
+                nc[k] = v
+        out[pid] = nc
+    return out
 
 
 def count_models(provider):
@@ -220,9 +250,13 @@ def main():
 
     dst = resolve_mimo_path()
     oc = load_json(OC_PATH)
-    src_provider = oc.get('provider')
+    raw = oc.get('providers')
+    if isinstance(raw, dict) and raw:
+        src_provider = oc_v2_to_mimo(raw)  # opencode v2 → mimocode 形状
+    else:
+        src_provider = oc.get('provider')  # 旧 V1 配置兜底
     if not isinstance(src_provider, dict) or not src_provider:
-        sys.exit('opencode 配置无 provider 段或为空，拒绝覆盖')
+        sys.exit('opencode 配置无 provider(s) 段或为空，拒绝覆盖')
     npm_fixed = ensure_npm(src_provider)
 
     if os.path.isfile(dst):

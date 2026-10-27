@@ -10,7 +10,7 @@ description: >-
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.3.1"
+  version: "1.4.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
@@ -108,7 +108,7 @@ metadata:
 |------|--------------|
 | pi | https://pi.dev/docs/latest/models |
 | omp (Oh My Pi) | https://omp.sh/docs/custom-models |
-| opencode | https://opencode.ai/docs/models 、https://opencode.ai/docs/providers |
+| opencode | https://opencode.ai/v2/docs/models 、https://opencode.ai/v2/docs/providers 、https://opencode.ai/v2/docs/migrate-v1 |
 | mimocode | https://mimo.xiaomi.com/mimocode/config.json （schema） |
 | dsh（DeepSeek Harness） | https://deepseek-harness.github.io/deepseek-harness/guide/providers ；中文源：https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.zh.md （字段全集见 config-catalog 的 `dsh-llm-pi-ai`/`PiAiCompatProfile`） |
 | zcode | GitHub 源码：https://github.com/zai-org/ZCode （schema 入口：`packages/provider/src/config/provider-data-schema.ts`、`packages/provider/src/config/rule-data-schema.ts`、`packages/shared/src/model-config.ts`） |
@@ -243,7 +243,7 @@ done
 |----------|----------|-------------|-------------|
 | pi | `references/pi.md` | `providers.{渠道}.models` 数组 `{id, name}`，可补 maxTokens/contextWindow/reasoning/input/cost | 保留 `!echo -n "$VAR"` 形式 |
 | omp | `references/omp.md` | `providers.{渠道}.models` YAML 列表 `{id, name}` | env 变量名**裸形式**（不带 `$`），保留 omp 现有引用（env 名可能不同，如 omp kilo 用 `NVIDIA_API_KEY`，不可覆盖） |
-| opencode | `references/opencode.md` | `provider.{渠道}.models` 对象 map（key=id，value `{id, name, family}`）；provider 缺 `npm` 时补 `@ai-sdk/openai-compatible` | 保留 `{env:XXX}` 占位符 |
+| opencode | `references/opencode.md` | v2：`providers.{渠道}.models` 对象 map（key=id，value `{modelID, name, family}`）；provider 缺 `package` 时补 `aisdk:@ai-sdk/openai-compatible`（`settings` 存 apiKey/baseURL） | 保留 `{env:XXX}` 占位符 |
 | mimocode | `references/mimocode.md` | **不从 pi 直写**；经 opencode 中转后 `provider` 整块覆盖 | **写死明文实值**（解析 `{env:VAR}` / `!echo` 占位符） |
 | dsh | `references/dsh.md` | patch 条目 `id: llm-pi-ai` → `config.providers.{渠道}.models` 列表仅 `id` | **不写密钥**：只用 `apiKeyEnv` 引用环境变量（明文另有 `.credentials.yaml`，见下） |
 | zcode | `references/zcode.md` | 规则式（`personalModelIds`/`modelOrder` + `providerModelRules`） | **写死明文实值**（不支持 env 引用） |
@@ -255,7 +255,7 @@ done
 - 只写**用户级（全局）**配置，**禁止修改项目级/工作区内的配置文件**（pi/omp/opencode/dsh/zcode/qoder/codebuddy 全部适用）
 - 只合并/新增模型条目，保留已有条目不变；同步为**合并式（只增不删）**，上游下架的模型不会自动移除，需清理时手动处理（**mimocode 例外**：经 opencode 覆盖，整块替换）
 - 若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时一并更新到配置文件中（字段映射见各参考文件）
-- 渠道级字段（baseURL/kind/compat/npm 等）：已有值不更新，仅目标缺失/为空时补入（opencode/mimocode 的 `npm` 缺失时补默认适配器 `@ai-sdk/openai-compatible`）
+- 渠道级字段（baseURL/kind/compat/npm 等）：已有值不更新，仅目标缺失/为空时补入（opencode v2 的 `package` 缺失时补默认适配器 `aisdk:@ai-sdk/openai-compatible`；mimocode 的 `npm` 缺失时补 `@ai-sdk/openai-compatible`）
 
 ### 多工具全量同步（pi 为基准）
 

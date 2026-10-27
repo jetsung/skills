@@ -1,51 +1,56 @@
-# opencode 配置参考（`~/.config/opencode/opencode.json`）
+# opencode 配置参考（v2 原生格式，`~/.config/opencode/opencode.json`）
 
-官方文档：https://opencode.ai/docs/models 、https://opencode.ai/docs/providers
+官方文档：https://opencode.ai/v2/docs/models 、https://opencode.ai/v2/docs/providers 、https://opencode.ai/v2/docs/migrate-v1
+
+> opencode v2 仍读取 `~/.config/opencode/opencode.json(c)`，`$schema: "https://opencode.ai/config.json"` 不变；
+> V1 格式仍被兼容（内存中自动归一化），但原生 v2 格式为推荐写法（2026-10 已全量迁移）。
 
 ## 读取与写入格式
 
-`provider.{渠道}.models` 是**对象（map）**，key 为 `{family}/{id}` 或 `{id}`，value 为 `{id, name, family}`：
+顶层键为 **`providers`**（V1 为 `provider`）。`providers.{渠道}.models` 是**对象（map）**，key 为 `{family}/{id}` 或 `{id}`，value 为：
 
 ```json
 "openrouter/stealth-ox-alpha-free": {
-  "id": "stealth-ox-alpha-free",
+  "modelID": "stealth-ox-alpha-free",
   "name": "openrouter/stealth-ox-alpha-free",
   "family": "openrouter"
 }
 ```
 
-> opencode 的模型 key/name 通常复用渠道中的完整模型 id，具体以 opencode.json 现有 provider 的 models 结构为准（可能为 0 条，需参考同文件的 other provider 结构）。
+> 模型条目 V1 的 `id` 字段在 v2 改名 **`modelID`**（发给上游的真实模型 id）；key/name 通常复用渠道中的完整模型 id，具体以 opencode.json 现有 provider 的 models 结构为准（可能为 0 条，需参考同文件的 other provider 结构）。
 
 ## 配置结构（官方文档摘录）
 
-- 配置文件 `~/.config/opencode/opencode.json`（支持 JSONC），`$schema: "https://opencode.ai/config.json"`；内置 75+ 提供商（经 AI SDK + [Models.dev](https://models.dev) 目录），凭据经 `/connect` 存于 `~/.local/share/opencode/auth.json`
-- **模型引用格式**：完整 id 为 `provider_id/model_id`；`provider_id` 是配置中 `provider` 对象的键名，`model_id` 是 `provider.models` 的键名
-- **provider 级字段**：
-  - `npm`：适配器包名；OpenAI 兼容端点用 `@ai-sdk/openai-compatible`，Anthropic Messages 用 `@ai-sdk/anthropic`。同步脚本对缺失/为空的 provider 兜底补 `@ai-sdk/openai-compatible`，已有值不动（补入位置在 `options` 之前）
-  - `options.baseURL`：覆盖该 provider 的端点（代理/自建网关用）
-  - `models`：对象 map，key 为模型 id，value 为模型条目（`{id, name, family}`，另可含下述 options/variants）
-  - `blacklist`：`[模型id]`，从 `/models` 选择器隐藏指定模型；`whitelist`：只保留列出模型；两者可组合（先 whitelist 收窄再 blacklist 剔除）
-- **模型条目 `options`**（全局请求选项）：
-  - OpenAI 类：`reasoningEffort`（`none`~`xhigh`）、`textVerbosity`、`reasoningSummary`、`include: ["reasoning.encrypted_content"]`
-  - Anthropic 类：`thinking: { type: "enabled", budgetTokens: 16000 }`
-- **`variants`（变体）**：同一模型多套配置而不建重复条目——`models.{id}.variants.{变体名}` 内放 options 同款字段；内置变体：Anthropic `high`/`max`（思考预算），OpenAI `none`/`minimal`/`low`/`medium`/`high`/`xhigh`，Google `low`/`high`；变体可设 `disabled: true` 停用；`variant_cycle` 快捷键切换
-- **默认模型**：顶层 `"model": "provider_id/model_id"`；启动加载优先级：`--model` 标志 > 配置 `model` 字段 > 上次使用的模型 > 第一个可用模型
+- 凭据经 `/connect` 存于 `~/.local/share/opencode/auth.json`
+- **模型引用格式**：`provider_id/model_id`（可带 `#variant` 变体）；`provider_id` 是 `providers` 对象的键名，`model_id` 是 `provider.models` 的键名
+- **provider 级字段**（V1 → V2 改名）：
+  - `npm` → **`package`**：适配器包名；AI SDK 包需加 `aisdk:` 前缀，OpenAI 兼容端点用 `aisdk:@ai-sdk/openai-compatible`。同步脚本对缺失/为空的 provider 兜底补该值（插在 `settings` 之前），已有值不动
+  - `options` → **`settings`**：provider 包选项（`apiKey`、`baseURL` 等都放这里）；另有 `headers`（额外请求头）与 `body`（请求体字段）分离
+  - `api` 字段废弃，端点改用 `settings.baseURL`
+  - `models`：对象 map，key 为模型 id，value 为模型条目（`{modelID, name, family}`，另可含 capabilities/limit/variants）
+  - V1 `blacklist`/`whitelist` 无原生字段，行为经 `policies` 实现（可继续保留 V1 写法，自动归一化）
+- **模型条目**：
+  - `id` → `modelID`；`tool_call`/`modalities` → `capabilities.tools`/`capabilities.input`/`capabilities.output`；`status: "deprecated"` → `disabled: true`；缓存成本 `cache_read`/`cache_write` → `cache.read`/`cache.write`
+  - 请求选项 `options` → `settings`（如 OpenAI 类 `reasoningEffort`、Anthropic 类 `thinking`），模型级 `body` 放 provider 特定请求体字段
+  - `compatibility.reasoningField` 可指定流式推理字段（识别 `reasoning`/`reasoning_content`/`reasoning_text`）
+- **`variants`（变体）**：V1 对象改为**数组**，每项带 `id`：
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode/gpt-5.1-codex",
-  "provider": {
+  "providers": {
     "openai": {
-      "options": { "baseURL": "https://my-proxy.example.com/v1" },
-      "blacklist": ["gpt-5-legacy"],
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": { "baseURL": "https://my-proxy.example.com/v1" },
       "models": {
         "gpt-5": {
-          "options": { "reasoningEffort": "high" },
-          "variants": {
-            "low": { "reasoningEffort": "low" },
-            "fast": { "disabled": true }
-          }
+          "modelID": "gpt-5",
+          "settings": { "reasoningEffort": "high" },
+          "variants": [
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "fast", "disabled": true }
+          ]
         }
       }
     }
@@ -53,7 +58,10 @@
 }
 ```
 
-> 同步脚本只合并 `provider.{渠道}.models` map（含各条目的 options/variants）与补全缺失的 `npm`，不动 `options.baseURL` 等已有渠道字段。
+- **默认模型**：顶层 `"model": "provider_id/model_id"` 不变；选择优先级：会话已选 > `--model` 标志 > 配置 `model` 字段 > 最新可用模型
+- **其他 v2 顶层改名**：`plugin` → `plugins`、`agent` → `agents`、`command` → `commands`、`mcp` 下服务器归入 `mcp.servers`（`enabled` 反转为 `disabled`）、`attachment` → `media`、`snapshot` → `snapshots`、`skills.paths+urls` 合并为数组
+
+> 同步脚本只合并 `providers.{渠道}.models` map（含各条目的 settings/variants）与补全缺失的 `package`，不动 `settings.baseURL` 等已有渠道字段。
 
 ## 全量同步脚本
 
@@ -61,4 +69,4 @@
 python3 scripts/sync-pi-to-opencode.py
 ```
 
-目标配置：`~/.config/opencode/opencode.json`；models 格式为对象 map（key=id，value 含 family=id 前缀或渠道名）；apiKey 保留 `{env:XXX}` 占位符。幂等可重复执行，自动备份+断言校验。
+目标配置：`~/.config/opencode/opencode.json`；models 格式为对象 map（key=id，value 含 modelID/family=id 前缀或渠道名）；apiKey 保留 `{env:XXX}` 占位符。幂等可重复执行，自动备份+断言校验。
