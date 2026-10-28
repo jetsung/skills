@@ -1,0 +1,55 @@
+# 提交前预处理（prek：Rust 重写的 pre-commit，原生 TOML 配置，也兼容 .pre-commit-config.yaml）。
+#
+# 用法：
+#   prek install                      # 按 default_install_hook_types 写入 .git/hooks/
+#   prek run --all-files              # 全量跑一遍（默认只跑 pre-commit 阶段的钩子）
+#   prek run skill-validate --all-files                   # 单独跑某个钩子
+#   prek uninstall                    # 移除钩子
+#:schema https://www.schemastore.org/prek.json
+
+minimum_prek_version = "0.5.0"
+
+# 提交前只跑快检查；重量级校验（agentskills 逐 skill 规范校验）放到推送前。
+default_install_hook_types = ["pre-commit", "pre-push"]
+
+# 本仓库为纯 Markdown/Python/TOML 的 skills 集合，无构建产物；.gitignore 命中的
+# 文件 prek 会自动跳过，无需额外 exclude。
+
+# 1) 文件卫生：prek 的内置实现，离线可用、不需要额外环境。
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "mixed-line-ending", args = ["--fix=lf"] },
+    { id = "check-yaml" },
+    { id = "check-toml" },
+    { id = "check-json" },
+    { id = "check-merge-conflict" },
+    { id = "check-added-large-files" },
+]
+
+# 2) frontmatter 严格校验：每次提交必跑（秒级）。
+#    校验所有 SKILL.md 的 name 与目录名一致、description 长度、metadata 键值类型、
+#    规范外字段等；pyyaml 由 uv 临时注入，无需安装。依赖系统有 uv。
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "frontmatter-validate"
+name = "SKILL.md frontmatter 校验"
+language = "system"
+entry = "uv run --with pyyaml python scripts/validate-frontmatter.py"
+files = "^skills/.*\\.md$|^scripts/validate-frontmatter\\.py$"
+pass_filenames = false
+stages = ["pre-commit"]
+
+# 3) 官方规范校验：逐 skill 跑 agentskills validate，秒级但逐个下载工具环境，
+#    放到推送前。依赖系统有 uvx。
+[[repos.hooks]]
+id = "skill-validate"
+name = "agentskills 规范校验"
+language = "system"
+entry = "bash -c 'for d in skills/*/; do uvx --from skills-ref agentskills validate \"$d\" || exit 1; done'"
+pass_filenames = false
+stages = ["pre-push"]

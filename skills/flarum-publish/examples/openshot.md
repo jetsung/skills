@@ -32,4 +32,3 @@ OpenShot Video Editor 是一款屡获大奖、完全免费且开源的视频编�
 
 https://github.com/OpenShot/openshot-qt
 http://www.openshot.org/
-

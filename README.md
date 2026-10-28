@@ -5,14 +5,16 @@
 ## 目录
 - [项目简介](#项目简介)
 - [Skills 列表](#skills-列表)
-  - [git-commit-me](#git-commit-me)
+  - [atuin](#atuin)
   - [flarum-publish](#flarum-publish)
+  - [git-commit-me](#git-commit-me)
+  - [google-rust-styleguide](#google-rust-styleguide)
   - [huawei-deveco-studio-fetch](#huawei-deveco-studio-fetch)
   - [incremental-translate](#incremental-translate)
   - [incremental-translation](#incremental-translation)
+  - [just](#just)
   - [model-channel-sync](#model-channel-sync)
   - [navi](#navi)
-  - [just](#just)
   - [update-gh-action-version](#update-gh-action-version)
 - [安装](#安装)
 - [添加新 Skill](#添加新-skill)
@@ -23,6 +25,36 @@
 本项目收录了日常开发中常用的 Agent Skills，每个 Skill 包含一份 `SKILL.md`（描述触发条件与使用规范）以及可选的辅助脚本。AI 助手加载后可根据指令自动执行对应任务。
 
 ## Skills 列表
+
+### atuin
+
+> 安装、配置、使用与排障 Atuin —— 用 SQLite 数据库替换 shell 内置历史的工具（记录 cwd、退出码、耗时、主机与会话），支持端到端加密同步与常驻 daemon。
+
+- **触发场景**：安装 Atuin、配置 shell 插件、注册/登录/同步账号、导入旧历史、搜索/过滤/删除历史、调整 `config.toml` 或快捷键、排除敏感命令、安装 AI agent hooks（claude-code / codex / opencode / pi）、编写 `.atuin/skills`、自建同步服务、运行 `atuin doctor`
+- **路径**：`skills/atuin/`
+- **依赖**：任意 POSIX shell；文档基于 Atuin >= 18.18；`cargo`/`gh` 仅自建服务时需要
+
+**特性：**
+
+- 覆盖完整使用路径：安装 → shell 集成 → 账号与同步 → 历史管理 → 配置调优
+- 按需加载 `references/`（cli / config / daemon / agent-hooks / excluding / mcp / self-hosting）
+- 含 AI agent hooks 与 `.atuin/skills` 集成指引
+
+**用法：**
+
+```bash
+# 安装后挂到 shell（zsh 示例）
+eval "$(atuin init zsh)"
+
+# 搜索历史 / 同步
+atuin search "关键词"
+atuin sync
+
+# 体检排障
+atuin doctor
+```
+
+---
 
 ### git-commit-me
 
@@ -85,6 +117,22 @@ cat article.md | uv run --script skills/flarum-publish/scripts/publish.py "标�
 ```
 从 https://github.com/jetsung/skills 安装 flarum-publish SKILL（skills/flarum-publish），并按 references/image-compression.md 用 fx4.cn 短链安装图片压缩工具 oxipng、rimage、resvg。
 ```
+
+---
+
+### google-rust-styleguide
+
+> 按 Google Rust 风格指南（[rustguide](https://google.github.io/styleguide/rustguide.html)）编写、修改与评审 Rust 代码：覆盖代码组织、导入规则、所有权与 API 设计、类型与 trait、命名、文档注释、unsafe 与实现细节。
+
+- **触发场景**：编写/修改/重构 Rust 代码、评审 Rust PR/diff、设计 Rust API、配置 rustfmt/clippy、讨论 Rust 风格分歧
+- **路径**：`skills/google-rust-styleguide/`
+- **依赖**：无外部依赖（纯指令型 skill）
+
+**特性：**
+
+- `SKILL.md` 提供核心原则、规则速览与评审对照清单
+- 六个主题参考文件按需加载：code-organization / ownership-and-apis / types-and-traits / naming-and-docs / language-features / implementation-concerns
+- 区分库代码与应用代码的 API 设计规则强度；含 rustfmt 推荐配置与 `#[rustfmt::skip]` 使用边界
 
 ---
 
@@ -208,7 +256,7 @@ python3 skills/just/scripts/update.py
 
 ---
 
- ### update-gh-action-version
+### update-gh-action-version
 
 > 自动检测并更新 GitHub Actions 工作流文件中使用的 Action 版本至最新主版本。
 
@@ -248,21 +296,37 @@ git clone https://github.com/jetsung/skills.git
 
 ## 添加新 Skill
 
-在 `skills/` 目录下创建新的 skill 文件夹，至少包含一个 `SKILL.md` 文件：
+遵循 [Agent Skills](https://agentskills.io/) 官方规范（详见 [AGENTS.md](AGENTS.md) 的「SKILL 规范」一节），在 `skills/` 目录下创建新的 skill 文件夹：
 
 ```
 skills/skill-name/
-├── SKILL.md          # 必须：描述 name、description、使用方法
-└── scripts/          # 可选：辅助脚本
+├── SKILL.md          # 必须：YAML frontmatter + Markdown 正文
+├── references/       # 可选：按需加载的详细文档
+├── scripts/          # 可选：辅助脚本
+└── assets/           # 可选：模板与静态资源
 ```
 
 `SKILL.md` 头部需包含 YAML frontmatter：
 
 ```yaml
 ---
-name: skill-name
-description: 简要描述 skill 的功能与使用场景
+name: skill-name        # 小写字母/数字/连字符，与目录名一致，≤64 字符
+description: 简要描述 skill 的功能与使用场景（≤1024 字符）
+metadata:
+  version: "1.0.0"
 ---
+```
+
+正文建议不超过 500 行，详细内容拆分到 `references/` 等目录按需加载。
+
+提交前运行校验：
+
+```bash
+# 官方规范校验（单个 skill）
+uvx --from skills-ref agentskills validate ./skills/skill-name
+
+# frontmatter 严格校验（全部 skill）
+uv run --with pyyaml python scripts/validate-frontmatter.py
 ```
 
 ## 许可证

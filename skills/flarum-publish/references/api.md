@@ -91,4 +91,3 @@ curl -X POST "$FLARUM_URL/api/fof/upload" \
 
 - `POST /api/users`：创建用户（`attributes.username` / `email` / `password`）。
 - `POST /api/posts`：在已有讨论下回帖（`type: "posts"`，`attributes.content` + `relationships.discussion`）。
-

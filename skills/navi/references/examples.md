@@ -17,7 +17,7 @@ $ branch: git branch | awk '{print $NF}'
 
 ```sh
 % cheatsheets
- 
+
 # Download default cheatsheets
 navi repo add denisidoro/cheats
 
