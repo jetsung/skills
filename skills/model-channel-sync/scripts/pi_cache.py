@@ -36,6 +36,14 @@ CACHE_PATH = os.path.expanduser('~/.cache/model-channel-sync/pi-models.json')
 # 同步时直接以 pi 写死的模型列表为准（不做实时失效过滤），参数值仍从缓存原装数据取
 FORCE_NO_MODEL_FILTER = ('openrouter', 'nvidia', 'anyapi', 'cli2api')
 
+# Nvidia / AMD 渠道系列约束（默认启用，SKIP_SERIES_FILTER=1 可跳过）：模型 id 以 "/" 拆分为
+# provider/model 后，取 model 部分（转小写）开头的连续字母前缀匹配本名单，命中才同步。
+# 如 meta/muse-glimmer-30b → model 前缀 "muse" 命中；DeepSeek-V4-Flash → "deepseek" 命中；
+# MiniCPM5-2B → "minicpm" 不命中（剔除）。匹配不区分大小写（全部转小写再比较）。
+SERIES_ALLOW = ('minimax', 'mimo', 'glm', 'qwen', 'deepseek', 'kimi', 'step', 'muse')
+# 应用此约束的渠道 key（不区分大小写）
+SERIES_CHANNELS = ('nvidia', 'amd')
+
 
 def _is_relay(pname, pdata):
     """中转站渠道判定：模型条目 vendor 值（不区分大小写）或渠道 key 命中 FORCE_NO_MODEL_FILTER。"""
@@ -76,19 +84,76 @@ def is_text_model(m):
     return True if inp is None else 'text' in inp
 
 
+def series_prefix(mid):
+    """模型 id 的系列前缀：以 "/" 拆分为 provider/model 后，取 model 部分转小写
+    开头的连续字母。如 meta/muse-glimmer-30b → "muse"；DeepSeek-V4-Flash → "deepseek"。"""
+    model = mid.split('/')[-1] if '/' in mid else mid
+    s = ''
+    for ch in model.lower():
+        if ch.isalpha():
+            s += ch
+        else:
+            break
+    return s
+
+
+def series_allowed(mid):
+    """系列约束命中判定：model 部分前缀（小写）在 SERIES_ALLOW 名单中返回 True。"""
+    return series_prefix(mid) in SERIES_ALLOW
+
+
 def filter_models(cached, pname, items):
     """同步时模型过滤：①/models 可读的渠道剔除实时列表中已不存在的模型（模型已失效不添加）；
     ②剔除不支持文本输入的模型（input 存在且不含 text，如纯 image/ocr 模型）；
+    ③Nvidia/AMD 渠道剔除系列不在 SERIES_ALLOW 的模型（model 前缀白名单，SKIP_SERIES_FILTER=1 可跳过）；
     无 /models 接口的渠道（no_models_api）不做失效过滤（以 pi 写死列表为准）。
-    返回 (过滤后 items, 剔除的模型 id 列表)。"""
+    返回 (过滤后 items, 剔除列表)；剔除项为 {id, reason}，reason ∈ {'失效','非文本','系列约束'}。"""
     live = (cached.get('models_api') or {}).get(pname)
     if live is not None:
         live = set(live)
         items = [m for m in items if m.get('id') in live]
-    dropped = [m['id'] for m in items if not is_text_model(m)]
+    dropped = []
+    for m in items:
+        if not is_text_model(m):
+            dropped.append({'id': m['id'], 'reason': '非文本'})
     if dropped:
         items = [m for m in items if is_text_model(m)]
+    # Nvidia / AMD 系列约束（默认启用；SKIP_SERIES_FILTER=1 显式跳过）
+    if pname.lower() in SERIES_CHANNELS and os.environ.get('SKIP_SERIES_FILTER') != '1':
+        sdrop = [m['id'] for m in items if not series_allowed(m['id'])]
+        if sdrop:
+            items = [m for m in items if series_allowed(m['id'])]
+            dropped += [{'id': mid, 'reason': '系列约束'} for mid in sdrop]
     return items, dropped
+
+def dropped_note(pname, dropped):
+    """把 filter_models 返回的剔除列表格式化为可读文案（带原因）。空列表返回 None。"""
+    if not dropped:
+        return None
+    reason_txt = {'失效': '实时 /models 不再存在', '非文本': '不支持文本输入',
+                  '系列约束': '系列不在白名单'}
+    parts = []
+    for d in dropped:
+        rid = d['id'] if isinstance(d, dict) else d
+        why = reason_txt.get(d.get('reason', '') if isinstance(d, dict) else '', '')
+        parts.append(f'{rid}（{why}）' if why else rid)
+    return f'{pname}: 剔除模型 {len(dropped)} 个: ' + '、'.join(parts)
+
+# 不得主动添加的渠道（除非用户显式声明，如 ALLOW_NO_AUTO_ADD=1 或渠道在 ALLOW_NO_AUTO_ADD 列表）：
+# 同步脚本在目标平台无对应渠道时，禁止自动创建 opencode/openrouter 的 provider。
+# 存量/已有 provider 的模型更新不受限；仅限制"新建渠道"动作。
+NO_AUTO_ADD_CHANNELS = ('opencode', 'openrouter')
+
+
+def no_auto_add(pname):
+    """渠道是否禁止自动新建 provider（不区分大小写）。
+    ALLOW_NO_AUTO_ADD=1 或渠道在 ALLOW_NO_AUTO_ADD 列表时放行（用户显式声明添加）。"""
+    if pname.lower() not in NO_AUTO_ADD_CHANNELS:
+        return False
+    if os.environ.get('ALLOW_NO_AUTO_ADD') == '1':
+        return False
+    allow = (os.environ.get('ALLOW_NO_AUTO_ADD') or '').lower().split(',')
+    return pname.lower() not in [a.strip() for a in allow if a.strip()]
 
 
 def _extract():
@@ -97,8 +162,9 @@ def _extract():
         pi = json.load(f)
     providers, models_api, no_models_api, unavailable = {}, {}, [], {}
     for pname, pdata in pi.get('providers', {}).items():
+        models = [m['id'] for m in pdata.get('models', []) if isinstance(m, dict) and m.get('id')]
         r = channel_check.check(pname, pdata.get('baseUrl') or '',
-                                channel_check.pi_key_val(pdata.get('apiKey')))
+                                channel_check.pi_key_val(pdata.get('apiKey')), models=models)
         if not r['ok']:
             unavailable[pname] = r['reason']  # 渠道不通 → 不入缓存
             continue

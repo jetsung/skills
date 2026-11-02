@@ -120,8 +120,9 @@ for pname, pdata in pi['providers'].items():
             out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
     else:
         items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-        if dropped:
-            out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+        note = pi_cache.dropped_note(pname, dropped)
+        if note:
+            out.append(note)
     if not items:
         out.append(f'跳过 {pname}: 无目标模型')
         continue
@@ -136,6 +137,10 @@ for pname, pdata in pi['providers'].items():
         rule = next((r for r in rules if r.get('providerName')
                      and norm(r['providerName']) == norm(ALIAS.get(pname, pname))), None)
     if rule is None:
+        # 约束：不得主动添加 opencode/openrouter 渠道（用户显式声明除外）
+        if pi_cache.no_auto_add(pname):
+            out.append(f'跳过 {pname}: 禁止自动新建渠道（opencode/openrouter 需显式声明）')
+            continue
         # 自动创建渠道：providerId = baseURL 域名主体；同主体不同 TLD 时确定性带顶级后缀消歧
         # （如 api.agnes-ai.cn 与 api.agnes-ai.com 均为 agnes-ai → agnes-ai-cn / agnes-ai-com），
         # 禁用 -2/-3 序号后缀（顺序依赖，重跑可能互换导致重复创建）

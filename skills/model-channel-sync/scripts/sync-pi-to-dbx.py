@@ -203,8 +203,9 @@ def sync(db_path, pi):
                 out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
         else:
             src_models, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-            if dropped:
-                out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+            note = pi_cache.dropped_note(pname, dropped)
+            if note:
+                out.append(note)
         if pname in FREE_CHANNELS:
             src_models = [i for i in src_models if free_only(i['id'])]
         if not src_models:
@@ -224,6 +225,10 @@ def sync(db_path, pi):
         best = best_in_family(raw_ids)
         env_val = env_val_of(pdata)
         if row is None:
+            # 约束：不得主动添加 opencode/openrouter 渠道（用户显式声明除外）
+            if pi_cache.no_auto_add(pname):
+                out.append(f'跳过 {pname}: 禁止自动新建渠道（opencode/openrouter 需显式声明）')
+                continue
             rid = str(uuid.uuid4())
             cfg = new_config_json(pdata, src_models)
             # new_config_json 已填好 models/model，无需二次覆盖

@@ -161,8 +161,9 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
                 out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
         else:
             src_models, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-            if dropped:
-                out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+            note = pi_cache.dropped_note(pname, dropped)
+            if note:
+                out.append(note)
         items = [i for i in src_models if wanted(i, pname)]
         if not items:
             out.append(f'跳过 {pname}: 无模型（空列表，或免费渠道过滤后为空）')
@@ -193,6 +194,10 @@ def sync(qoder_path, pi, upstream_ids, upstream_short_ids, channel_ids, baseurl_
         m = re.match(r'!echo -n "\$([A-Z0-9_]+)"', pdata.get('apiKey', ''))
         env_val = os.environ[m.group(1)] if (m and os.environ.get(m.group(1))) else ''
         if key is None:
+            # 约束：不得主动添加 opencode/openrouter 渠道（用户显式声明除外）
+            if pi_cache.no_auto_add(pname):
+                out.append(f'跳过 {pname}: 禁止自动新建渠道（opencode/openrouter 需显式声明）')
+                continue
             key = 'qoder-custom-' + str(uuid.uuid4())
             qc['providers'][key] = new_provider(pname, pdata, env_val, items)
             how = 'created'

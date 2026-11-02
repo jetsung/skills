@@ -10,12 +10,21 @@ description: >-
   支持配置文件中所有 OpenAI 兼容渠道（openrouter、kilo、opencode、newapi、nvidia、atomgit 等）。
 compatibility: Requires curl, python3 (with PyYAML), and network access to provider APIs.
 metadata:
-  version: "1.5.0"
+  version: "1.7.0"
 ---
 
 # 模型渠道配置管理（免费提取与多工具同步）
 
 本技能管理**AI 模型渠道配置**：从任意渠道提取**真正可用**的免费/零价模型，并将渠道、模型、密钥同步到多个 agent 工具的配置文件。核心价值：很多模型看似免费（带 `free` 标签或定价为 0），但实际因地区限制、鉴权失败、上游故障而不可用。技能完成「抓取 → 筛选 → 实测 → 结论 → 可选写入/同步多工具」的完整闭环。
+## 术语定义
+
+本技能涉及两个容易混淆的概念，先明确：
+
+**平台（platform）**：AI 编码**工具**本身，指读写的配置文件所属软件，如 pi、omp（Oh My Pi）、opencode、mimocode、dsh、zcode、qoder、codebuddy、dbx。平台负责**消费**模型（调用模型做编码/对话），本身不提供模型。
+
+**渠道（channel / provider）**：**模型提供商**，含中转站（如 openrouter、newapi、kilo、ds2api），是平台配置文件 `providers`（或等价字段）下的某个 key。渠道负责**提供**模型（`baseUrl` + `apiKey` 指向的 AI 服务），一个平台可接入多个渠道。
+
+> 关系：**一个平台接入多个渠道，每个渠道提供一批模型**。本文所有"渠道"均指模型提供商；"平台"均指 pi/omp 等工具。同步方向通常为**以 pi 平台配置为基准 → 同步到其它平台**，同步的是**渠道及其模型**（同一渠道可被多个平台共用）。
 
 **目录结构**：
 - `scripts/` — 各工具同步脚本（幂等，自动备份+断言校验）与上游免费模型提取脚本 `fetch_free.py`
@@ -89,18 +98,25 @@ metadata:
 
 各 `sync-pi-to-*.py` 脚本**不直接读 pi**，也不各自做渠道检查，而是统一经 `scripts/pi_cache.py` 读取缓存 `~/.cache/model-channel-sync/pi-models.json`。**缓存即检查结果**——渠道可用性验证在缓存生成时一次性完成：
 
-- **提取即检查**：生成缓存时对每个渠道调 `GET {baseUrl}/models`（apiKey 从 pi 解析为实值）：
-  - **渠道不通**（鉴权失败/连接失败/响应异常，**不含 HTTP 429 限流**）→ 该渠道**不写入缓存**；同步脚本从缓存取数时自然跳过此渠道，不创建 provider、不写密钥、不合并模型
-  - **HTTP 429 限流**（`Too Many Requests` / `rate limit`）→ **视为可用**（临时限额，模型/渠道存在，按可用渠道处理）
-  - **可用且 /models 返回模型列表** → 原装数据入缓存，并记入 `models_api[渠道] = [实时模型 id 列表]`
-  - **可用但无 /models 接口**（HTTP 405、端点不返回 data 列表等）→ 记入 `no_models_api` 列表；同步时**直接以 pi 写死的模型列表为准**，不做实时过滤
-  - **中转站渠道**（`pi_cache.py` 的 `FORCE_NO_MODEL_FILTER`，当前为 openrouter、nvidia）：判定依据是 pi 模型条目的 **`vendor` 字段值（不区分大小写）** 命中名单（渠道 key 命中也兜底生效），如某渠道模型的 `vendor` 为 `Openrouter` 即视为中转站。此类渠道 `/models` 可读但模型列表与 pi 不一一对应（聚合/改名），**按 no_models_api 方式处理**——同步时直接以 pi 写死的模型列表为准（不做失效过滤），**参数值（contextWindow/maxTokens/input 等）仍从缓存原装数据取**
+- **提取即检查（两段式实测）**：生成缓存时对每个渠道做两步验证（apiKey 从 pi 解析为实值，候选模型取 pi 渠道自带模型 id，最多试 5 个）：
+  1. **端点探测**：调 `GET {baseUrl}/models`——HTTP 200 且返回 `data` 数组（允许空）→ 端点可达并取实时模型 id 列表；HTTP 405 / 无 data → 可达但无模型列表；其它 HTTP 错误 / 连接失败 / 非 JSON → **渠道不可用**
+  2. **chat 实测**：用候选模型调 `POST {baseUrl}/chat/completions` 发最小真实请求（`max_tokens:8`）——**HTTP 200 且有 `choices` → 可用**；HTTP 429 限流（`rate limit` / `inference exceeds tpm/rpm limit`）→ **可用**（临时限额，模型/渠道存在）；401/403 鉴权失败、候选模型全部 400/404/5xx（模型停用/失效）、连接失败 → **不可用**
+
+  > **为什么必须 chat 实测**：部分网关的 `/models` 端点**不鉴权**——无密钥也返回模型列表，仅凭 HTTP 200 会误判可用。chat 实测才能证明密钥有效与模型可推理。`poolside`（模型全部 deactivated）、`hyper`（401 密钥无效）即由此暴露。
+  > 候选模型由 pi 渠道自带列表提供（`/models` 返回空/405 时仍可实测）；两者都无时退化为仅端点探测，reason 注明"未做 chat 实测"。
+
+- **渠道不通**（任一实测失败，**不含 HTTP 429 限流**）→ 该渠道**不写入缓存**；同步脚本从缓存取数时自然跳过此渠道，不创建 provider、不写密钥、不合并模型
+- **HTTP 429 限流**（`Too Many Requests` / `rate limit` / `inference exceeds tpm/rpm limit`）→ **视为可用**（临时限额，模型/渠道存在，按可用渠道处理）
+- **可用且 /models 返回模型列表** → 原装数据入缓存，并记入 `models_api[渠道] = [实时模型 id 列表]`
+- **可用但无 /models 接口**（HTTP 405、端点不返回 data 列表等）→ 记入 `no_models_api` 列表；同步时**直接以 pi 写死的模型列表为准**，不做实时过滤
+- **中转站渠道**（`pi_cache.py` 的 `FORCE_NO_MODEL_FILTER`，当前为 openrouter、nvidia）：判定依据是 pi 模型条目的 **`vendor` 字段值（不区分大小写）** 命中名单（渠道 key 命中也兜底生效），如某渠道模型的 `vendor` 为 `Openrouter` 即视为中转站。此类渠道 `/models` 可读但模型列表与 pi 不一一对应（聚合/改名），**按 no_models_api 方式处理**——同步时直接以 pi 写死的模型列表为准（不做失效过滤），**参数值（contextWindow/maxTokens/input 等）仍从缓存原装数据取**
 - **模型失效过滤**：同步时 `/models` 可读的渠道只添加实时列表中仍存在的模型——pi 有但实时缓存中已不存在的模型**不添加**（`pi_cache.filter_models`，剔除的在报告中注明）
 - **只同步文本模型**：pi 模型条目 `input` 字段缺省默认 `["text"]`（视为文本模型）；`input` 存在时必须包含 `text` 才同步——`["text","image"]` 的视觉模型照常同步，纯 `image`/`ocr` 等不支持文本输入的模型**不同步**（`pi_cache.is_text_model`，剔除的在报告中注明）。上游免费模型提取（`fetch_free.py`）同步剔除 id 含 `ocr` 的模型
 - **数据权威顺序**：渠道与模型**以 pi 为准**（哪些渠道、哪些模型），但**数据内容以缓存为准**（缓存是检查后的快照：不可用渠道已被剔除、失效模型已被标记）
 - **原装数据**：可用渠道的 providers 段原样保存（含 contextWindow/maxTokens/input/cost 等，不裁剪），支持参数的平台直接取用
 - **失效策略**：pi 文件 mtime 变化即重新提取（**重新做渠道检查**）；`PI_CACHE_TTL`（秒）强制过期重提；`python3 scripts/pi_cache.py` 手动刷新并查看检查结果（可用/不可用/无 /models 接口渠道清单）
-- 手动单渠道自检：`python3 scripts/channel_check.py <渠道名> <baseUrl> <apiKey> ...`
+- 手动单渠道自检：`python3 scripts/channel_check.py <渠道名> <baseUrl> <apiKey> ...`（两段式：/models 端点探测 + chat 实测；无候选模型时退化为仅端点探测）
+- **探测优先用 curl，urllib 仅兜底**：部分服务器（如 `apihub.agnes-ai.com`）对 Python urllib 的 TLS 握手**稳定挂起**（OpenSSL 3.5.9 与服务器不兼容），`channel_check.py` 的 `_probe_models`/`_probe_chat` 已重构为 **curl 主探测（`_curl_get`/`_curl_post`）+ urllib 兜底**（curl 不可用/异常时回退 urllib）。修改探测代码时保持此顺序：**先 curl 后 urllib**，勿颠倒。
 
 ## 各平台模型配置官方文档（速查）
 
@@ -254,6 +270,7 @@ done
 **共同规则：**
 - 只写**用户级（全局）**配置，**禁止修改项目级/工作区内的配置文件**（pi/omp/opencode/dsh/zcode/qoder/codebuddy 全部适用）
 - 只合并/新增模型条目，保留已有条目不变；同步为**合并式（只增不删）**，上游下架的模型不会自动移除，需清理时手动处理（**mimocode 例外**：经 opencode 覆盖，整块替换）
+- **完全替换模式（`--replace`）**：加 `--replace` 时以 pi 为基准**完全替换**目标平台渠道/模型——① 删除 pi 没有的渠道（`KEEP_CHANNELS` 指定保留，默认 `{'magpie'}` 保留渠道但跳过模型更新）；② 删除 pi 有的渠道中 pi 没有的模型；③ 自动创建 pi 有但目标没有的渠道；④ 断言放行（允许删除而非只增）。当前已支持：`sync-pi-to-omp.py`、`sync-pi-to-opencode.py`（均含自动创建新渠道）；zcode/qoder/codebuddy/dbx/dsh 的替换用结构化重写脚本完成（见下方"完全替换（结构化）"）。**未加 `--replace` 默认仍是合并式**。
 - 若 API 返回的模型包含 maxTokens、contextWindow 等参数字段，同步写入时一并更新到配置文件中（字段映射见各参考文件；渠道特定规则中注明的除外，如 Sense 渠道不写 `reasoning`/`maxTokens`）
 - 渠道级字段（baseURL/kind/compat/npm 等）：已有值不更新，仅目标缺失/为空时补入（opencode v2 的 `package` 缺失时补默认适配器 `aisdk:@ai-sdk/openai-compatible`；mimocode 的 `npm` 缺失时补 `@ai-sdk/openai-compatible`）
 
@@ -263,14 +280,24 @@ done
 
 ```bash
 python3 scripts/sync-pi-to-opencode.py
+python3 scripts/sync-pi-to-opencode.py --replace   # 完全替换（删渠道/模型，自动新建）
 python3 scripts/sync-pi-to-dsh.py              # 默认 profile=web；--profile <名> / --dry-run
 python3 scripts/sync-pi-to-omp.py
+python3 scripts/sync-pi-to-omp.py --replace     # 完全替换（删渠道/模型，自动新建）
 python3 scripts/sync-pi-to-zcode.py
 python3 scripts/sync-pi-to-qoder.py
 python3 scripts/sync-pi-to-codebuddy.py
 python3 scripts/sync-pi-to-dbx.py          # 写入 DBX ai_configs 表；加 --dry-run 只打印计划不写库
 python3 scripts/sync-pi-to-mimocode.py     # 两段流水线：pi → opencode → 覆盖 mimocode
 ```
+
+**完全替换（结构化）**：zcode/qoder/codebuddy/dbx/dsh 的 sync 脚本**未加 `--replace`**（合并式），完全替换用**结构化重写脚本**（按平台写临时脚本，yaml/JSON/SQLite 结构化处理，先副本测试再应用真实文件）：
+- **dsh**：yaml 结构化重写（保留头部注释与顶层条目，改 `llm-pi-ai` 条目的 `config.providers`）——dsh 无特殊 YAML 标签（`!!js` 仅注释），可安全结构化重写；替换脚本用 `DSH_TEST` 环境变量指向测试副本，真实路径 `~/.dsh/profiles/web/cordis.patch.yml`
+- **zcode**：JSON 结构化（`providerRules`/`providerOrder`/`providerModelRules` 联动删除与重建）；渠道按 `providerName` 规范化匹配 pi；新渠道 providerId 用 baseURL 域名主体（`api.ifm.ai`→`ifm`，`llm.asfd.cn`→`asfd`）
+- **qoder/qoder-cn**：JSON 结构化（`providers` 按 baseUrl 去尾斜杠匹配；新渠道 key=`qoder-custom-{UUID}`，模型条目含 `model`/`displayName`/`capabilities`）；`QODER_TEST` 指向测试副本目录（`:` 分隔）
+- **codebuddy**：扁平 `models[]` 按 `vendor`（渠道显示名）匹配；**agnes-com/sense-ai 的模型 id 加渠道前缀**（`agnes-com/`、`sense-ai/`）避免与 agnes/sense 的 id 冲突（vendor 分别用 `AgnesCom`/`Sense AI`）
+- **dbx**：`ai_configs` 表 0 行时直接跑 `sync-pi-to-dbx.py` 全量新建（每渠道一条配置）；替换前先备份 `dbx.db.bak-replace-*`
+- **通用**：替换前手动备份目标文件（`.bak-replace-YYYYMMDD-*`）；用副本先验证（渠道/模型数、无重复 id、字段完整、JSON/YAML 有效），确认后应用真实文件
 
 **mimocode 专用流水线（先 opencode 后覆盖，必须按序）**：mimocode 的 `provider` 与 opencode 同构，**不从 pi 直写**。目标是把 mimocode 的提供商**清空后用 opencode 的 `provider` 整块覆盖**（非合并）；**密钥写明文**（mimocode 不认 `{env:VAR}` 占位符，脚本自动解析环境变量实值）：
 
@@ -295,7 +322,9 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
 
 ### 渠道特定规则
 
-- **AMD 渠道全量同步**：不区分免费/付费，同步时全量写入所有模型
+- **不得主动添加 opencode / openrouter 渠道**（除非用户显式声明）：同步脚本在目标平台（omp/zcode/qoder/dbx 等）**无对应渠道时禁止自动新建**这两个渠道的 provider，仅在用户显式声明添加（`ALLOW_NO_AUTO_ADD=1` 或渠道在 `ALLOW_NO_AUTO_ADD` 列表）时放行。**存量/已有 provider 的模型更新不受限**，仅限制"新建渠道"动作；opencode/dsh 脚本本身无自动新建（无匹配即跳过），codebuddy 为扁平结构无渠道层级，均不受影响。实现：`pi_cache.no_auto_add()` 统一守卫（`NO_AUTO_ADD_CHANNELS`），各脚本新建分支调用。
+- **Magpie 本地服务渠道**（本地电脑部署的服务，如 `127.0.0.1:3425`）：**无论是否启用都需要添加**（作为渠道存在，如 omp 的 `magpie`）；**若服务未启动，除非显式指定，否则不修改该渠道的模型列表**。判定：本地地址（`127.0.0.1` / `localhost` / `0.0.0.0` 或内网回环）且 `/models` 或 chat 实测连接失败（如 `Connection refused`）→ 视为服务未启动，同步时**保留渠道但跳过模型更新**（不新增/不删除/不改模型列表），仅当用户显式指定（如 `MAGPIE_FORCE=1` 或 `--with-magpie`）才强制更新。magpie 渠道**不在 pi 基准**（pi 的 `models.json` 无此渠道），故 pi→omp 等同步天然不会动它；此规则约束**任何可能触碰本地渠道的同步路径**。
+- **AMD 渠道全量同步**：不区分免费/付费，同步时全量写入所有模型（受上述系列约束过滤后）
 - **Sense 渠道版本族精简**：只保留每个系列的最新版模型（如 `sensenova-6.7-flash-lite` 和 `sensenova-6.8-flash-lite` 只保留后者）；同系列（id 含相同前缀）按版本号排序取最高
 - **Sense 渠道参数精简**：渠道 baseUrl 为 `token.sensenova.cn` / `token.sensenova.ai`（渠道 key `sense` / `sense-ai`）时，写入 pi/omp 的模型条目**不携带 `reasoning` 与 `maxTokens` 两个参数**，pi/omp 已有条目中的这两个参数在同步/清理时一并移除；`contextWindow` 等其它参数照常（omp 侧由 `sync-pi-to-omp.py` 自动执行该精简；按 baseUrl 主机判定，勿按渠道 key 判定）
 - **模型筛选**：openrouter/opencode 渠道只补**免费模型**（id 含 `:free`/`-free`/`/free`），其它渠道全量同步
@@ -317,7 +346,7 @@ python3 scripts/sync-opencode-to-mimocode.py --dry-run
 - 不要只依赖 `free` 标签，若渠道提供定价字段，用价格=0 判断更完整；渠道没有定价字段时要退化到 `free-tag`/`keyword` 并明确告知用户。
 - 不要跳过连通性测试，很多"免费"模型实际不可用；报告给用户的免费清单必须是**实测可用**的，不可用的一律列入剔除原因。
 - 各工具结构差异易错点：
-  - dsh 的 models 元素只含 `id`，路径是 Cordis patch 数组中 `id: llm-pi-ai` 条目的 `config.providers.{渠道}`（`baseURL` 全大写），**顶层是列表不是映射**，不要与 pi 的 `providers.{渠道}` 混淆；patch 文件含文件头注释与其它无关条目，**只能文本级增量插入，禁止 `yaml.safe_dump` 整篇重写**
+  - dsh 的 models 元素只含 `id`，路径是 Cordis patch 数组中 `id: llm-pi-ai` 条目的 `config.providers.{渠道}`（`baseURL` 全大写），**顶层是列表不是映射**，不要与 pi 的 `providers.{渠道}` 混淆；patch 文件含文件头注释与其它无关条目。**常规增量插入只能文本级**（禁止 `yaml.safe_dump` 整篇重写会破坏格式）；但**完全替换可安全结构化重写**——dsh 无特殊 YAML 标签（`!!js` 仅出现在注释），用 `yaml.safe_load` 读入、改 `llm-pi-ai.config.providers`、`yaml.safe_dump` 重写时**保留头部注释**（前导 `#` 行）与顶层条目即可，已实测验证
   - **dsh 不写明文密钥**：provider 凭据字段是 `apiKeyEnv`（环境变量名），明文存 `$DSH_HOME/.credentials.yaml`（0600），patch 里**不应出现** `apiKey:` 明文；密钥缺失报 `MISSING_CREDENTIAL` 时走「模型页重存密钥」或「导出环境变量」，不要把明文写进 patch。同步脚本只动 `models`，不读不写任何密钥值
   - zcode 的 `access.apiKey`/qoder 的顶层 `apiKey` 均为**明文实值**，不支持任何 env 引用形式；zcode 渠道条目与模型条目字段集合**固定**，不可添加额外字段
   - qoder 的 id 字段名为 `model`（非 pi/dsh 的 `id`），`baseUrl` 顶层小写 l；渠道 key 为 `qoder-custom-{UUID}`，每渠道独立 provider + 独立密钥 + 独立模型

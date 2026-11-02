@@ -150,8 +150,9 @@ for pname, pdata in pi['providers'].items():
             out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
     else:
         items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-        if dropped:
-            out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+        note = pi_cache.dropped_note(pname, dropped)
+        if note:
+            out.append(note)
     for m in items:
         mid = m['id']
         seen.add(norm(mid))

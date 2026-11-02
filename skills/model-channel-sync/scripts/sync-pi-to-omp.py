@@ -44,21 +44,53 @@ def norm(s):
     return re.sub(r'[^a-z0-9]', '', s.lower())
 
 
+REPLACE = '--replace' in sys.argv  # 完全替换：删除 pi 没有的渠道/模型（magpie 保留）
+# 本地服务渠道：即使服务未启动也保留渠道（magpie 临时关停）；不修改其模型列表
+KEEP_CHANNELS = {'magpie'}
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(OMP_PATH, OMP_PATH + '.bak-' + stamp)
 pi = pi_cache.load()
 omp = yaml.safe_load(open(OMP_PATH))
 providers = omp['providers']
-
 out = []
 srclim_by_key = {}  # provider key → {模型 id: {contextWindow?, maxTokens?}}（限制同步的断言放行依据）
 sense_by_key = {}   # provider key → bool（是否 Sense 渠道）
+if REPLACE:
+    pi_keys = {norm(k) for k in pi['providers']}
+    removed_ch = []
+    # ① 删除 omp 中 pi 没有的渠道（magpie 保留）
+    for k in list(providers):
+        if norm(k) not in pi_keys and k not in KEEP_CHANNELS:
+            removed_ch.append(k)
+            del providers[k]
+    if removed_ch:
+        out.append('删除渠道（pi 基准无此渠道）: ' + '、'.join(removed_ch))
+    # ② 删除 pi 有的渠道中 pi 没有的模型
+    removed_m = {}
+    for pname, pdata in pi['providers'].items():
+        key = pname if pname in providers else {norm(k): k for k in providers}.get(norm(pname))
+        if key is None:
+            continue
+        pi_mids = {m['id'] for m in pdata.get('models', []) if isinstance(m, dict)}
+        models = providers[key].get('models', [])
+        gone = [m.get('id') for m in models
+                if isinstance(m, dict) and m.get('id') not in pi_mids]
+        providers[key]['models'] = [m for m in models
+                                    if not isinstance(m, dict) or m.get('id') in pi_mids]
+        if gone:
+            removed_m[key] = gone
+    for k, gone in removed_m.items():
+        out.append(f'{k}: 删除模型 {len(gone)} 个 {gone}')
 for pname, pdata in pi['providers'].items():
     if pname in providers:
         key = pname
     else:
         key = {norm(k): k for k in providers}.get(norm(pname))
     if key is None:
+        # 约束：不得主动添加 opencode/openrouter 渠道（用户显式声明除外）
+        if pi_cache.no_auto_add(pname):
+            out.append(f'跳过 {pname}: 禁止自动新建渠道（opencode/openrouter 需显式声明）')
+            continue
         # pi 中存在但 omp 无对应渠道 → 自动创建 provider
         # baseUrl 明文、api 从 pi 取、apiKey 从 pi 的 !echo -n "$VAR" 提取 env 变量名（omp 裸形式）
         m = re.match(r'!echo -n "\$([A-Z0-9_]+)"', pdata.get('apiKey', ''))
@@ -89,8 +121,9 @@ for pname, pdata in pi['providers'].items():
     sense_by_key[key] = sense
     # 模型失效过滤：/models 可读渠道剔除实时列表中已不存在的模型（no_models_api 渠道以 pi 列表为准）
     items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-    if dropped:
-        out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+    note = pi_cache.dropped_note(pname, dropped)
+    if note:
+        out.append(note)
     for item in items:
         mid = item['id']
         lim = {k: item[k] for k in ('contextWindow', 'maxTokens') if item.get(k)}
@@ -126,8 +159,13 @@ with open(OMP_PATH, 'w') as f:
 
 bak = yaml.safe_load(open(OMP_PATH + '.bak-' + stamp))
 bprov, cprov = bak['providers'], providers
-assert list(bprov.keys()) == list(cprov.keys())[:len(bprov)], 'provider 键序被改动（已有键顺序变化）'
-assert set(bprov.keys()) <= set(cprov.keys()), '已有 provider 被删除'
+if REPLACE:
+    # 完全替换：允许删除渠道（magpie 保留）与模型，仅校验保留渠道的键序与字段
+    keep_keys = [k for k in bprov if k in cprov]
+    assert [k for k in cprov if k in bprov] == keep_keys, '保留 provider 键序被改动'
+else:
+    assert list(bprov.keys()) == list(cprov.keys())[:len(bprov)], 'provider 键序被改动（已有键顺序变化）'
+    assert set(bprov.keys()) <= set(cprov.keys()), '已有 provider 被删除'
 for k in cprov:
     if k not in bprov:
         continue  # 新建 provider 不做后备对比断言
@@ -141,7 +179,8 @@ for k in cprov:
     excl = tuple(dict.fromkeys(('contextWindow', 'maxTokens') + strip))
     for bid, bmv in bidx.items():
         if bid not in cidx:
-            assert False, f'{k}: 现有模型条目 {bid} 被删除'
+            assert REPLACE, f'{k}: 现有模型条目 {bid} 被删除'  # 完全替换允许删除
+            continue
         cmv = cidx[bid]
         allow = allow_all.get(bid, {})
         for lk in excl:

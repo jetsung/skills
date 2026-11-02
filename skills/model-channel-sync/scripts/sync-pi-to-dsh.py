@@ -178,8 +178,9 @@ def main():
                 out.append(f'{pname}: 上游提取失败（{e}），回退 pi models')
         else:
             items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-            if dropped:
-                out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+            note = pi_cache.dropped_note(pname, dropped)
+            if note:
+                out.append(note)
         existing = {m['id'] for m in (prov.get('models') or []) if isinstance(m, dict)}
         todo = [m for m in items if m.get('id') not in existing]
         # provider 级字段：已有值不更新，仅空值补充

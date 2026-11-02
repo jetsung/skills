@@ -1,4 +1,4 @@
-# zcode 配置参考（`~/.zcode/v2/provider_config.json`）
+# zcode 配置参考（`~/.zcode/v2/provider_config.json`，可用环境变量 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` 覆盖路径）
 
 zcode 配置为**规则式**结构，顶层 `{schemaVersion: 1, config}`：
 
@@ -42,7 +42,7 @@ zcode 配置为**规则式**结构，顶层 `{schemaVersion: 1, config}`：
 }
 ```
 
-## schema 要点（严格约束，写入时不可违反；源自解包 zcode 0.16.9 运行时 zod schema 与内置 `zcode-builtin.json`）
+## schema 要点（严格约束，写入时不可违反；源自 zcode 源码仓库 github.com/zai-org/ZCode 的 zod schema `packages/provider/src/config/` 与内置 `config/provider/zcode-builtin.json`）
 
 - **providerId**：内置渠道为 `builtin:xxx`；自定义渠道为 **baseURL 域名主体**（去掉子域名与顶级后缀；多段顶级后缀如 `com.cn` 取 3 段中的主体，如 `developer.amd.com.cn` → `amd`；`{env:VAR}` 占位符无法解析域名时保留渠道原名）。**同主体不同 TLD 消歧**：不同域名提取出相同主体时（如 `api.agnes-ai.cn` 与 `api.agnes-ai.com` 均为 `agnes-ai`），命名**确定性带顶级后缀**——`agnes-ai-cn` 与 `agnes-ai-com`（`.` → `-`），与处理顺序无关，保证幂等；**禁止**用 `-2`/`-3` 序号后缀消歧（顺序依赖，重跑可能互换导致重复创建）。单一渠道时维持简洁主体（`tokenrouter`）。同一 `provider_config.json` 内不可重复
 - **渠道条目**：`{providerId, providerName, config}`，`config` 字段集合**固定**为 `group`（`standard-personal`）、`access: {type: "api-key", apiKey}`、`api: {type, baseUrl}`、`personalModelIds[]`、`modelOrder[]`——**不可添加任何额外字段**（无 enabled/source/kind/models），字段顺序为 `group → access → api → personalModelIds → modelOrder`
@@ -57,7 +57,7 @@ zcode 配置为**规则式**结构，顶层 `{schemaVersion: 1, config}`：
 |----------|-----------|
 | `providerConfigRules` | `{templateRules[], providerRules[]}` 两个数组 |
 | `providerRules[].config.group` | enum：`standard-personal`（个人渠道唯一可用值）/ `zai-family` / `bigmodel-family`（内置专用） |
-| `providerRules[].config.access` | discriminatedUnion(type)：`api-key`（`{type, apiKey, apiKeyManagementUrl?}`）/ `zhipu-coding-plan-api-key`（`{type, apiKey?, apiKeyManagementUrl?}`）/ `zhipu-account`（`{type, accountType: zai\|bigmodel, mode: start-plan\|individual-coding-plan\|team-coding-plan\|off-peak, entitled}`，内置专用） |
+| `providerRules[].config.access` | discriminatedUnion(type)：`api-key`（`{type, apiKey, apiKeyManagementUrl?}`）/ `zhipu-coding-plan-api-key`（`{type, apiKey?, apiKeyManagementUrl?}`）/ `zhipu-account`（`{type, accountType: zai\|bigmodel, mode: start-plan\|individual-coding-plan\|team-coding-plan\|off-peak\|highspeed, entitled}`，内置专用） |
 | `providerRules[].config.api` | `{type, baseUrl, headers?}`，`headers` 为 string map（值同样不支持 env 插值）；`type` enum：`anthropic-messages` / `openai-chat-completions` / `openai-responses` |
 | `providerRules[].config` 可选字段 | `logo?: {type: "builtin", key: string}`、`visibility?: "visible"|"hidden"`、`builtinModelIds?[]`、`enabled?`——个人自定义渠道**不写**这些 |
 | `modelConfigRules` | `{modelRules[], modelApiRules[], providerSiteRules[], templateModelRules[], builtinProviderModelRules[], providerModelRules[], manualProviderModelRules[]}`；注意这 7 个数组**分属两组 strict schema**：builtin 组（`builtinModelConfigRulesSchema`）= modelRules/modelApiRules/providerSiteRules/templateModelRules/builtinProviderModelRules，personal 组（`personalModelConfigRulesSchema`）= providerModelRules/manualProviderModelRules；个人渠道只写 `providerModelRules`（必要时 `manualProviderModelRules`） |
@@ -70,7 +70,7 @@ zcode 配置为**规则式**结构，顶层 `{schemaVersion: 1, config}`：
 | `apiKeyManagementUrl` | 可选，必须是合法 URL（如 `https://z.ai/manage-apikey/apikey-list`） |
 | api 端点路径（`api.type` → 请求路径） | `anthropic-messages` → `/v1/messages`；`openai-chat-completions` → `/chat/completions`；`openai-responses` → `/responses`（UI `ProviderApiFormatSelect.tsx`）；personal 渠道的 `api.baseUrl` 允许暂存为空串/任意字符串（草稿态），但完整校验必须是合法 URL |
 
-> zcode 的 `access.apiKey` **只支持明文实值，不支持任何环境变量形式**（已解包 zcode 0.16.9 运行时验证：`resolveApiKey` 为恒等透传，`{env:VAR}`、`!echo -n "$VAR"`、`${VAR}`、dotenvx `.env` 均无解析逻辑，占位符会被当字面文本原样发送导致鉴权失败；`api.headers` 的值同样不做 env 插值）。读取时直接取值，注意勿将密钥写入日志/输出；同步脚本从 pi 的 `!echo -n "$VAR"` 解析 env 后注入明文。写入后**必须校验**：渠道与模型条目的字段集合与文件中现有条目完全一致（多余的 `enabled`/`properties` 等字段会导致格式错误）。
+> zcode 的 `access.apiKey` **只支持明文实值，不支持任何环境变量形式**（源码 `resolveApiKey` 为恒等透传，`{env:VAR}`、`!echo -n "$VAR"`、`${VAR}`、dotenvx `.env` 均无解析逻辑，占位符会被当字面文本原样发送导致鉴权失败；`api.headers` 的值同样不做 env 插值）。读取时直接取值，注意勿将密钥写入日志/输出；同步脚本从 pi 的 `!echo -n "$VAR"` 解析 env 后注入明文。写入后**必须校验**：渠道与模型条目的字段集合与文件中现有条目完全一致（多余的 `enabled`/`properties` 等字段会导致格式错误）。
 
 ## 读取渠道配置
 

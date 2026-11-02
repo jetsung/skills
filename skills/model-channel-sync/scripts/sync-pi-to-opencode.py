@@ -43,6 +43,8 @@ def ensure_package(prov):
     return True
 
 
+REPLACE = '--replace' in sys.argv  # 完全替换：删除 pi 没有的渠道/模型
+KEEP_CHANNELS = {'magpie'}
 stamp = datetime.date.today().strftime('%Y%m%d')
 shutil.copy(OC_PATH, OC_PATH + '.bak-' + stamp)
 pi = pi_cache.load()
@@ -51,6 +53,28 @@ providers = oc['providers']
 
 out = []
 srclim_by_key = {}  # provider key → {模型 id: {context?, output?}}（限制同步的断言放行依据）
+if REPLACE:
+    pi_keys = {norm(k) for k in pi['providers']}
+    removed_ch = []
+    for k in list(providers):
+        if norm(k) not in pi_keys and k not in KEEP_CHANNELS:
+            removed_ch.append(k)
+            del providers[k]
+    if removed_ch:
+        out.append('删除渠道（pi 基准无此渠道）: ' + '、'.join(removed_ch))
+    removed_m = {}
+    for pname, pdata in pi['providers'].items():
+        key = pname if pname in providers else {norm(k): k for k in providers}.get(norm(pname))
+        if key is None:
+            continue
+        pi_mids = {m['id'] for m in pdata.get('models', []) if isinstance(m, dict)}
+        models = providers[key].get('models', {})
+        gone = [mid for mid in models if mid not in pi_mids]
+        providers[key]['models'] = {mid: mv for mid, mv in models.items() if mid in pi_mids}
+        if gone:
+            removed_m[key] = gone
+    for k, gone in removed_m.items():
+        out.append(f'{k}: 删除模型 {len(gone)} 个 {gone}')
 for pname, pdata in pi['providers'].items():
     if pname in providers:
         key = pname
@@ -59,8 +83,24 @@ for pname, pdata in pi['providers'].items():
     else:
         key = {norm(k): k for k in providers}.get(norm(pname))
     if key is None:
-        out.append(f'跳过 {pname}: opencode 无对应 provider')
-        continue
+        # pi 存在但 opencode 无对应渠道 → 自动创建 provider（完全替换/合并均适用）
+        if pi_cache.no_auto_add(pname):
+            out.append(f'跳过 {pname}: 禁止自动新建渠道（opencode/openrouter 需显式声明）')
+            continue
+        m = re.match(r'!echo -n "\$([A-Z0-9_]+)"', pdata.get('apiKey', ''))
+        env_name = m.group(1) if m else ''
+        prov = {
+            'name': pname + ' Custom',
+            'package': PKG_DEFAULT,
+            'settings': {
+                'apiKey': '{env:' + env_name + '}' if env_name else '',
+                'baseURL': pdata.get('baseUrl', ''),
+            },
+            'models': {},
+        }
+        providers[pname] = prov
+        key = pname
+        out.append(f'{pname}: 新建 provider（{PKG_DEFAULT}）')
     prov = providers[key]
     if ensure_package(prov):
         out.append(f'{pname}: package 空值补充（{PKG_DEFAULT}）')
@@ -77,8 +117,9 @@ for pname, pdata in pi['providers'].items():
     srclim = {}
     # 模型失效过滤：/models 可读渠道剔除实时列表中已不存在的模型（no_models_api 渠道以 pi 列表为准）
     items, dropped = pi_cache.filter_models(pi, pname, pdata.get('models', []))
-    if dropped:
-        out.append(f'{pname}: 剔除失效模型 {dropped}（实时 /models 不再存在）')
+    note = pi_cache.dropped_note(pname, dropped)
+    if note:
+        out.append(note)
     for item in items:
         mid = item['id']
         lim = {}
@@ -111,8 +152,14 @@ with open(OC_PATH, 'w') as f:
     f.write('\n')
 
 bak = json.load(open(OC_PATH + '.bak-' + stamp))
-assert list(bak['providers'].keys()) == list(providers.keys()), 'provider 键序被改动'
+if REPLACE:
+    keep_keys = [k for k in bak['providers'] if k in providers]
+    assert [k for k in providers if k in bak['providers']] == keep_keys, '保留 provider 键序被改动'
+else:
+    assert list(bak['providers'].keys()) == list(providers.keys()), 'provider 键序被改动'
 for k in providers:
+    if k not in bak['providers']:
+        continue  # 新建 provider 不做后备对比断言
     b, c = bak['providers'][k], providers[k]
     bm, cm = b.get('models', {}), c.get('models', {})
     allow_all = srclim_by_key.get(k, {})
