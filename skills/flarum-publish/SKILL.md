@@ -3,7 +3,7 @@ name: flarum-publish
 description: 通过 Flarum REST API 把文章发布为论坛讨论（主题）。当用户要求把内容/文件发布或投稿到 Flarum 论坛、给出 GitHub 项目链接要求整理成中文文章发帖、转存图片到论坛图床（fof/upload）时使用——即使未明说「Flarum」，只要是往论坛发帖即适用。可选：文章发布后，用户以关键词（如「整理教程」「生成使用教程」）触发，把项目整理为基础使用教程并回帖到该文章下（agent 不得主动触发）。
 compatibility: Requires uv (for `uv run --script`) and internet access (Flarum REST API, GitHub API)
 metadata:
-  version: "1.18.0"
+  version: "1.18.1"
 ---
 
 # Flarum 文章发布
@@ -273,13 +273,39 @@ Flarum 遵循 [JSON:API error spec](https://jsonapi.org/format/#errors)，读取
 
 ## 使用脚本
 
-四个 Python 脚本均内联声明依赖（PEP 723 `# /// script` 块），用 `uv run --script` 直接运行——uv 自动在隔离环境里装好 `requests` 并执行，无需手动建 venv 或 `pip install`。`uv` 缺失时先装：
+四个 Python 脚本均内联声明依赖（PEP 723 `# /// script` 块），用 `uv run --script` 直接运行——uv 自动在隔离环境里装好 `requests` 并执行，无需手动建 venv 或 `pip install`。
 
-```bash
-command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | bash
-```
+### 工具查找顺序（uv 等）
 
-下文命令假设从 skill 目录执行（脚本路径 `scripts/<name>.py`）；凭证通过环境变量传给脚本，不要写进任何配置文件。
+agent 的 shell 通常不加载用户启动文件，`command -v uv` 找不到**不代表没装**（可能装在 `~/.local/bin` 或由 mise 管理）。查找工具时按以下顺序执行：
+
+1. **按当前用户的 shell 加载对应环境**（先取 `$SHELL` 或 `echo $0` 判断）：
+
+   ```bash
+   case "$(basename "${SHELL:-/bin/bash}")" in
+     zsh)  set -a; . "$HOME/.zshrc" 2>/dev/null; set +a ;;
+     bash) set -a; . "$HOME/.bashrc" 2>/dev/null; set +a ;;
+     *)    set -a; . "$HOME/.profile" 2>/dev/null; set +a ;;
+   esac
+   ```
+
+   加载后再 `command -v uv`，命中即用（避免重复加载，可包在一条命令里完成）。
+
+2. **仍未找到时，按固定路径逐级查找**（顺序：全局 → 用户本地）：
+
+   ```bash
+   for d in /usr/bin /usr/local/bin "$HOME/.local/bin"; do
+     [ -x "$d/uv" ] && echo "$d/uv" && break
+   done
+   ```
+
+   找到后直接用绝对路径调用，如 `~/.local/bin/uv run --script scripts/publish.py ...`。
+
+3. **检查 mise shim**：`ls ~/.local/share/mise/shims/uv` 存在时，用绝对路径调用 `~/.local/share/mise/shims/uv run --script ...`（shim 目录通常不在非交互 PATH 中）。
+
+4. **以上全部落空，才真正安装**：优先 `mise install uv`（mise 已管理时禁止第三方独立脚本）；mise 不管理时再用 `curl -LsSf https://astral.sh/uv/install.sh | bash`（装到 `~/.local/bin/uv`）。同类的 `oxipng` / `rimage` / `resvg` 等压缩工具也按此顺序查找（详见 [references/image-compression.md](references/image-compression.md)）。
+
+下文命令假设从 skill 目录执行（脚本路径 `scripts/<name>.py`），且 `uv` 已按上述顺序找到（必要时替换为绝对路径）；凭证通过环境变量传给脚本，不要写进任何配置文件。
 
 ### publish.py — 发布讨论
 
