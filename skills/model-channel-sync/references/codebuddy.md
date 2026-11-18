@@ -1,6 +1,9 @@
 # codebuddy 配置参考（`~/.codebuddy/models.json`）
 
-官方文档：https://www.codebuddy.cn/docs/cli/models
+官方文档：CLI https://www.codebuddy.cn/docs/cli/models ；IDE https://www.codebuddy.cn/docs/ide/Features/models （`models.json 配置指南`）
+
+> 两个入口描述的是**同一个配置文件**（IDE 文档同样写用户级 `~/.codebuddy/models.json` + 项目级 `<workspace>/.codebuddy/models.json`），
+> 字段与合并规则基本逐字一致；差异见下方「CLI 文档与 IDE 文档的差异」。
 
 ## 配置结构
 
@@ -60,6 +63,19 @@
 **环境变量引用（可选）**：`apiKey` 和 `url` 支持 `${VAR_NAME}` 语法，CLI 启动时解析；变量不存在则保留原始占位符（导致 API 调用失败）。建议文件权限 `600`，勿提交含明文密钥的文件到版本库——同步脚本不采用 `${VAR}` 而是写死明文实值（与 qoder 一致），因此该文件切勿提交到版本库。
 
 **relatedModels 回退规则**：自定义模型**不继承**内置 `defaultRelatedModels`；主模型未声明 `relatedModels` 且无环境变量/`variantModels` 覆盖时，`lite`/`reasoning` 回退到主模型。场景变体解析优先级（高→低）：环境变量（`CODEBUDDY_SMALL_FAST_MODEL`=lite、`CODEBUDDY_BIG_SLOW_MODEL`=reasoning）→ 项目级 `variantModels[variant]`（存于 `settings.json`）→ 用户级 `variantModels[variant]` → 主模型条目 `relatedModels[variant]` → 内置 `defaultRelatedModels[variant]`（仅内置模型）→ 主模型自身。
+
+## CLI 文档与 IDE 文档的差异
+
+| 项 | CLI 文档（`/docs/cli/models`） | IDE 文档（`/docs/ide/Features/models`） | 本技能取舍 |
+|----|-------------------------------|----------------------------------------|------------|
+| 独有字段 | `temperature`、`relatedModels`（另隐含 `useCustomProtocol`） | 字段表只有 `id`/`name`/`vendor`/`apiKey`/`maxInputTokens`/`maxOutputTokens`/`url`/`supportsToolCall`/`supportsImages`/`supportsReasoning` | 只写两侧都认的字段；`temperature`/`relatedModels` 仅在原条目已有时保留 |
+| `apiKey` 写法 | 支持 `${VAR_NAME}` 环境变量引用，CLI 启动时解析；变量不存在则保留原占位符（调用失败） | 明确写「实际密钥值，非环境变量名」，通篇不提 `${VAR}` | **写死明文实值**（与两份文档都不冲突，IDE 侧只有明文可用） |
+| 接口类型 | 未单独强调 | 明确「目前仅支持 OpenAI 接口格式的 API」，`url` 必须完整路径（一般 `/chat/completions` 结尾） | 非 OpenAI Chat Completions 的渠道（如 Anthropic 原生 messages）**不能配到 codebuddy** |
+| 必填字段 | 字段表只有 `id` 标必填 | 字段表同样只有 `id`，但「故障排查」段落写「验证必填字段（`id`, `name`, `provider`) 是否都已提供」——与字段表矛盾，且 `provider` 并非真实字段名（真实名为 `vendor`） | 新增条目一律写齐 `id`+`name`+`vendor`，规避两种口径 |
+| 覆盖内置模型 | SmartMerge 同 `id` 覆盖（未单列用例） | 专设用例：用内置 `id`（如 `gpt-4-turbo`）+ 自定义 `url`/`apiKey` 改写内置模型 | 上游模型 id 若与内置 id 重名，即覆盖内置定义——需知悉该副作用 |
+| 其它 | 标签 `custom`、`availableModels` 过滤、热重载 1 秒防抖 | 一致；另列三级优先级（项目级 > 用户级 > 内置默认）与 OpenRouter / DeepSeek / 本地 Ollama 示例（Ollama 的 `apiKey` 填 `"ollama"` 占位） | 与既有规则相符，无需额外处理 |
+
+> IDE 文档一处 TIP 原文语句不完整（「删除配置中的 `availableModels` 字段后，需要同步删除上方`，`后再保存配置」，其后跟随一张截图），实操按 JSON 语法理解：删字段时把多余逗号一并清掉。
 
 ## 同步专属规则（`sync-pi-to-codebuddy.py`）
 

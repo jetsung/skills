@@ -4,24 +4,34 @@
 用法:
     python3 scripts/sync-pi-to-dsh.py [--profile web] [--dry-run]
 
-配置位置与结构（dsh 已升级为 Cordis patch 层）：
+配置位置与结构（dsh 已升级为 Cordis patch 层；字段以 0.2.1-rc.5 的 `dsh-llm-pi-ai`
+schema 为准，可用 `dsh --profile <名> --dump-config-schema` 导出核对）：
     $DSH_HOME/profiles/<profile>/cordis.patch.yml
   - 顶层是 **数组**，每项 {id, name?, config}；providers 位于 id == 'llm-pi-ai' 条目的
     config.providers 下（不再是旧的 settings.yaml 映射式 llm-pi-ai.providers）
   - 渠道字段：displayName / apiKeyEnv / api / baseURL / models（baseURL 全大写）
-  - models 元素只含 id（可选 input 等，见 references/dsh.md）
+  - models 元素：id 必填，可选 name / contextWindow / maxTokens / input /
+    reasoningEfforts / compat（模型条目已知字段集就是这六项，写到集合外没有意义）。
+    同 zcode/qoder 一样同步
+    pi 原装参数：本脚本写 name / contextWindow / maxTokens / input 四项；
+    reasoningEfforts 需逐模型等级声明表（pi 的 reasoning 布尔不可映射）、compat 属端点
+    断言不可自动推断——两者不在脚本写入范围，模型参数缺数据时省略字段由 dsh 走
+    defaultContextWindow（262144）/defaultMaxTokens（32768）/defaultInput（[text]）回退链
 
-写入方式：**文本级增量插入**——先用 PyYAML 解析做判断，再把缺失的 `- id: xxx` 行插到对应
-provider 的 models 段末尾，保留原文件注释、缩进与条目顺序。该文件是 patch 列表，含文件头
+写入方式：**文本级增量插入**——先用 PyYAML 解析做判断，再把缺失的模型条目（id + 参数行，
+格式与文件原有缩进一致）插到对应 provider 的 models 段末尾，保留原文件注释、缩进与条目顺序。
+该文件是 patch 列表，含文件头
 注释与 ui-settings-general / agent-default-model / web-search-deepseek 等无关条目，
 **不可用 yaml.safe_dump 整篇重写**。
 
 密钥：provider 只用 apiKeyEnv（环境变量名引用），明文存 $DSH_HOME/.credentials.yaml，
 patch 内不落明文。本脚本只读写 models，apiKeyEnv 原样保留，不读取也不写入任何密钥值。
-幂等（无变更不写文件）；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 新增。
+幂等（无变更不写文件）；自动备份（.bak-YYYYMMDD）；断言校验只允许 models 追加新增，
+现有模型条目逐字段不变。
 """
 import re, os, shutil, datetime, sys
 import yaml
+from urllib.parse import urlparse
 
 sys.dont_write_bytecode = True  # 不生成 __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +46,42 @@ ALIAS = {}  # 渠道别名映射（dsh key ≠ pi key 时在此登记）
 # opencode 渠道不同步（上游价格数据不正确）
 UPSTREAM_FREE = ('kilo', 'openrouter')
 SKIP_CHANNELS = ('opencode',)
+
+# 渠道 key → 渠道显示名（模型 name 前缀用，与 sync-pi-to-qoder.py 保持一致）
+CHANNEL_DISPLAY = {
+    'sense': 'Sense', 'amd': 'AMD', 'ds2api': 'DS2API', 'newapi': 'NewAPI',
+    'agnes': 'Agnes', 'cloudflare-workers-ai': 'Cloudflare Workers AI',
+    'atomgit': 'AtomGit', 'kilo': 'Kilo', 'v2ex': 'V2EX', 'colab': 'Colab',
+    'opencode': 'OpenCode', 'openrouter': 'OpenRouter', 'inferx': 'InferX',
+    'tokenrouter': 'TokenRouter',
+}
+# 按 baseUrl 主机判定（token.sensenova.cn / token.sensenova.ai），渠道 key 可能被改名，不按 key 判定
+SENSE_HOSTS = ('token.sensenova.cn', 'token.sensenova.ai')
+
+
+def is_sense(url):
+    """baseUrl 主机命中 Sense 渠道上游（token.sensenova.cn / token.sensenova.ai）时返回 True。"""
+    if not url:
+        return False
+    try:
+        return (urlparse(url).hostname or '') in SENSE_HOSTS
+    except ValueError:
+        return False
+
+
+def vendor_disp(pname):
+    """渠道显示名：CHANNEL_DISPLAY 名单内用映射，其它用渠道 key。"""
+    return CHANNEL_DISPLAY.get(pname, pname)
+
+
+def display_name(item, disp):
+    """模型显示名：渠道显示名 + ' - ' + 模型名（模型名已以渠道名开头则去掉重复前缀）。
+    例：newapi 的 "AMD DeepSeek Latest Flash" → "NewAPI - AMD DeepSeek Latest Flash"；
+        amd 的 "AMD DeepSeek V4 Flash" → "AMD - DeepSeek V4 Flash"（去重）"""
+    mname = item.get('name', item['id'])
+    if mname.lower().startswith(disp.lower()):
+        mname = mname[len(disp):].strip()
+    return f'{disp} - {mname}'
 
 TOP_RE = re.compile(r'^-\s+id:\s*(\S+)\s*$')
 
@@ -154,7 +200,7 @@ def main():
     out = []
 
     # 1) 结构化判断需要哪些变更
-    plan = []  # [(dsh 渠道 key, [模型条目 dict], [provider 字段行缩进内容])]
+    plan = []  # [(dsh 渠道 key, [模型条目 dict], [provider 字段行缩进内容], 渠道显示名, 是否 Sense)]
     for pname, pdata in pi['providers'].items():
         if pname in SKIP_CHANNELS:
             out.append(f'跳过 {pname}: 不同步（价格数据不正确）')
@@ -192,7 +238,7 @@ def main():
             fills.append(('api', pdata.get('api') or 'openai-completions'))
             out.append(f'{pname}: api 空值补充')
         if todo or fills:
-            plan.append((key, todo, fills))
+            plan.append((key, todo, fills, vendor_disp(pname), is_sense(pdata.get('baseUrl'))))
         out.append(f'{pname}: 新增模型 {len(todo)} 个 {[m["id"] for m in todo] if todo else ""}')
 
     if not plan:
@@ -217,7 +263,7 @@ def main():
     plo, phi = block_bounds(lines, prov, chi, e_indent + 4)
 
     inserts = []
-    for key, todo, fills in plan:
+    for key, todo, fills, disp, sense_ch in plan:
         ch = find_key_line(lines, plo, phi, e_indent + 6, key)
         if ch is None:
             out.append(f'跳过 {key}: 文本层未定位（格式异常）')
@@ -228,7 +274,17 @@ def main():
         for m in todo:
             mid = m['id']
             model_lines.append(' ' * item_indent + '- id: ' + fmt_id(mid))
-            # 视觉模型显式声明模态（dsh 手动录入模型默认纯文本）
+            # name：{渠道显示名} - {模型名}（模型名已含渠道名则去重；仅对新增条目生效，已有条目不动）
+            model_lines.append(' ' * (item_indent + 2) + 'name: ' + fmt_id(display_name(m, disp)))
+            # pi 原装参数（同 qoder/zcode）：有值才写；Sense 渠道（token.sensenova.*）精简 maxTokens
+            ctx, mout = m.get('contextWindow'), m.get('maxTokens')
+            if ctx and (isinstance(ctx, int) or (isinstance(ctx, float) and ctx.is_integer())):
+                model_lines.append(' ' * (item_indent + 2) + f'contextWindow: {int(ctx)}')
+            if mout and not sense_ch and (isinstance(mout, int) or (isinstance(mout, float) and mout.is_integer())):
+                model_lines.append(' ' * (item_indent + 2) + f'maxTokens: {int(mout)}')
+            # 视觉模型显式声明模态（dsh 手动录入模型默认纯文本；省略时走 defaultInput → [text]）。
+            # reasoningEfforts 需逐模型等级表（pi 的 reasoning 布尔不可映射）、compat 属端点断言，
+            # 均不由脚本写入，交由 dsh UI/手工配置
             if 'image' in (m.get('input') or []):
                 model_lines.append(' ' * (item_indent + 2) + 'input: [text, image]')
         field_lines = [' ' * m_indent + f'{k}: {v}' for k, v in fills]
@@ -274,6 +330,8 @@ def main():
         bm = [m for m in (bprov[k].get('models') or []) if isinstance(m, dict)]
         nm = [m for m in (nprov[k].get('models') or []) if isinstance(m, dict)]
         assert [m['id'] for m in bm] == [m['id'] for m in nm[:len(bm)]], f'{k}: 现有模型条目被改动/删除'
+        for b, n in zip(bm, nm[:len(bm)]):
+            assert b == n, f'{k}: 现有模型条目 {b.get("id")} 字段被改动（同步只允许追加）'
         for kk, vv in bprov[k].items():
             if kk == 'models':
                 continue

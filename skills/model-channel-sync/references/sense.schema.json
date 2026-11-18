@@ -1,0 +1,840 @@
+{
+  "$source": "https://platform.sensenova.cn/docs",
+  "$extracted_from": "/tmp/sense_docs.md（文档提取件，中英双语、以中文为准；提取件为碎片化截取，部分表格首尾缺失）",
+  "channel": "sense / sense-ai",
+  "provider": "SenseNova（商汤·日日新）",
+  "baseUrl": "https://token.sensenova.cn/v1",
+  "compatibility": [
+    "OpenAI Chat Completions 兼容（/v1/chat/completions）",
+    "OpenAI Responses 兼容（/v1/responses）",
+    "Anthropic Messages 兼容（/v1/messages）",
+    "OpenAI Images 风格同步生图/改图（/v1/images/generations、/v1/images/edits）"
+  ],
+  "auth": {
+    "type": "apiKey-bearer",
+    "header": "Authorization: Bearer $SENSENOVA_API_KEY",
+    "description": "Chat Completions、Anthropic Messages、Responses、图片生成/编辑各接口共用同一 API Key，均通过 Authorization: Bearer Header 传递。",
+    "anthropicSdkNote": "使用 Anthropic SDK 时，以 authToken 传钥会以 Authorization: Bearer 方式发送；若 SDK 版本不支持 authToken，可用 apiKey 参数替代。",
+    "keyManagement": "在 SenseNova 控制台（/console/keys）申请密钥并查看剩余额度；401/鉴权失败时优先检查 Key 与 Base URL 是否为 https://token.sensenova.cn/v1。"
+  },
+  "endpoints": {
+    "chat_completions": {
+      "path": "/v1/chat/completions",
+      "method": "POST",
+      "description": "OpenAI 兼容对话端点，文本/多模态理解与生成模型均走此接口；默认非流式输出。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型标识，各模型章节固定填写对应 model_id（如 sensenova-6.8-flash、sensenova-6.8-flash-lite、deepseek-flash 等）。"
+        },
+        "messages": {
+          "type": "array",
+          "required": true,
+          "description": "对话消息列表（sensenova-6.8-flash 支持 1M 上下文窗口）。"
+        },
+        "messages[].role": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "description": "消息角色：系统指令 / 用户消息 / 助手消息 / 工具结果。"
+        },
+        "messages[].content": {
+          "type": "string | array",
+          "required": false,
+          "description": "消息内容。纯文本用字符串；图文混合输入使用内容块数组。"
+        },
+        "messages[].content[].type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "text",
+            "image_url"
+          ],
+          "description": "内容块类型：文本填 text，图片填 image_url；使用内容块时必填。"
+        },
+        "messages[].content[].text": {
+          "type": "string",
+          "required": false,
+          "description": "文本块具体内容；type=text 时必填。"
+        },
+        "messages[].content[].image_url": {
+          "type": "object",
+          "required": false,
+          "description": "图片内容对象，通过 url 指定图片数据；type=image_url 时必填。"
+        },
+        "messages[].content[].image_url.url": {
+          "type": "string",
+          "required": false,
+          "description": "图片完整公网 URL 或 Base64 Data URL（如 data:image/png;base64,{Base64data}）；type=image_url 时必填。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "是否以 SSE 流式返回生成结果。长文本/思考模式建议开启以避免超时。"
+        },
+        "stream_options": {
+          "type": "object",
+          "required": false,
+          "description": "流式返回配置，仅 stream=true 时生效。"
+        },
+        "stream_options.include_usage": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "流式返回中是否包含 Token 用量统计。"
+        },
+        "temperature": {
+          "type": "float",
+          "required": false,
+          "default": 1,
+          "description": "采样温度，越高越随机、越低越确定；一般只调整此参数或 top_p 之一。sensenova-6.8-flash 取值范围 [0,1]；Responses 兼容口径下 sensenova-6.8-flash-lite、deepseek-flash 为 [0,2]，deepseek-v4-flash、glm-5.2 为 [0,2)。"
+        },
+        "top_p": {
+          "type": "float",
+          "required": false,
+          "default": 0.95,
+          "description": "核采样概率阈值，范围 (0,1]（默认值以 sensenova-6.8-flash 参数表为准）。"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "required": false,
+          "default": "64K（sensenova-6.8-flash）",
+          "description": "单次响应最大生成 Token 数；sensenova-6.8-flash 取值范围 [1,128K]。思考内容与回答共享该配额。"
+        },
+        "n": {
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "单次请求生成的候选回复数量；sensenova-6.8-flash 范围 [1,7]，另一模型参数表标注范围 [1,4]（提取件未注明所属模型）。"
+        },
+        "stop": {
+          "type": "string | array",
+          "required": false,
+          "description": "停止序列，生成时遇到匹配序列即停止。"
+        },
+        "presence_penalty": {
+          "type": "float",
+          "required": false,
+          "description": "存在惩罚，依据 Token 是否已出现调整生成倾向，用于减少重复话题。取值范围 [0,2]。"
+        },
+        "frequency_penalty": {
+          "type": "float",
+          "required": false,
+          "description": "频率惩罚，依据 Token 已出现次数调整其再次出现的倾向。取值范围 [0,2]。"
+        },
+        "repetition_penalty": {
+          "type": "float",
+          "required": false,
+          "description": "重复惩罚，用于抑制重复生成。取值范围 [1,2]。"
+        },
+        "seed": {
+          "type": "integer",
+          "required": false,
+          "description": "随机种子，提高相同请求可复现性（不保证完全一致）。范围 [0, 9999999)。"
+        },
+        "thinking": {
+          "type": "object",
+          "required": false,
+          "description": "思考模式配置对象，使用嵌套字段 type 设置模式。"
+        },
+        "thinking.type": {
+          "type": "string",
+          "required": false,
+          "default": "enabled",
+          "description": "思考开关。模型默认开启思考。sensenova-6.8-flash 仅支持 enabled、不支持关闭思考；可切换思考的模型用该参数开启/关闭推理模式。OpenAI 兼容模式下不支持 adaptive。"
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "required": false,
+          "default": "high",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "none"
+          ],
+          "description": "推理力度，值越高思考强度越大。sensenova-6.8-flash 参数表列出 minimal/low/medium/high/xhigh/max；原生档位为 none/low/high/max，Chat API 上设 none 可关闭思考。兼容映射：minimal→low、medium/xhigh→high、ultra→max。字段名按接口不同：Chat 用 reasoning_effort，Anthropic Messages 用 output_config.effort，Responses 用 reasoning.effort。"
+        },
+        "response_format": {
+          "type": "object",
+          "required": false,
+          "description": "输出格式约束；type 取 text 或 json_object（JSON 输出）。"
+        },
+        "tools": {
+          "type": "array",
+          "required": false,
+          "description": "可供模型调用的工具定义列表；目前仅支持函数工具，某模型参数表标注至多 128 个。"
+        },
+        "tools[].type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "function"
+          ],
+          "description": "工具类型，函数工具填 function；定义工具时必填。"
+        },
+        "tools[].function": {
+          "type": "object",
+          "required": false,
+          "description": "函数定义，包含名称、描述及入参结构；type=function 时必填。"
+        },
+        "tools[].function.name": {
+          "type": "string",
+          "required": false,
+          "description": "函数名称，用于识别和指定调用工具；定义函数时必填。"
+        },
+        "tools[].function.description": {
+          "type": "string",
+          "required": false,
+          "description": "函数用途与适用场景，帮助模型判断是否调用。"
+        },
+        "tools[].function.parameters": {
+          "type": "object",
+          "required": false,
+          "description": "用 JSON Schema 描述函数入参（属性、类型、必填项；其中 required 指函数入参的必填字段）。"
+        },
+        "tool_choice": {
+          "type": "string | object",
+          "required": false,
+          "default": "auto",
+          "description": "工具选择策略：auto 由模型决定；none 禁止调用；required 要求必须返回 tool_calls（推理模式下支持 required）；也可用对象指定函数（type=function，function.name 与 tools[].function.name 一致）。"
+        },
+        "tool_choice.type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "function"
+          ],
+          "description": "使用对象指定函数时必填，填写 function。"
+        },
+        "tool_choice.function.name": {
+          "type": "string",
+          "required": false,
+          "description": "指定调用的函数名称，应与 tools[].function.name 一致；使用对象指定函数时必填。"
+        },
+        "messages[].tool_calls": {
+          "type": "array",
+          "required": false,
+          "description": "回传对话历史时，助手消息中保存的工具调用信息，用于衔接工具执行结果。"
+        },
+        "messages[].tool_calls[].id": {
+          "type": "string",
+          "required": false,
+          "description": "工具调用唯一标识，用于关联工具结果；回传工具调用时必填。"
+        },
+        "messages[].tool_calls[].type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "function"
+          ],
+          "description": "函数调用填 function；回传工具调用时必填。"
+        },
+        "messages[].tool_calls[].function.name": {
+          "type": "string",
+          "required": false,
+          "description": "助手请求调用的函数名称；回传函数调用时必填。"
+        },
+        "messages[].tool_calls[].function.arguments": {
+          "type": "string",
+          "required": false,
+          "description": "函数入参，类型为 JSON 格式字符串（不是直接传 JSON 对象）；回传函数调用时必填。"
+        },
+        "messages[].tool_call_id": {
+          "type": "string",
+          "required": false,
+          "description": "role=tool 消息必填，填对应的 tool_calls[].id 以关联调用与结果；工具执行结果放在同条消息 content 中。"
+        }
+      },
+      "response": {
+        "structure": "标准 OpenAI Chat Completions 响应对象（choices[].message 含 content；开启思考时另有 reasoning_content 推理过程字段）。提取件中的响应 JSON 正文被截断，未列出全部字段。",
+        "finish_reason_enum": {
+          "stop": "正常结束",
+          "length": "达到 max_tokens 或上下文上限；思考占满配额时回复可能为空",
+          "tool_calls": "模型选择发起工具调用",
+          "content_filter": "被合规审查拦截"
+        },
+        "reasoning_mode": "推理模式默认开启；用 thinking.type 控制开启/关闭（可切换的模型），用 reasoning_effort 调整推理强度（Chat API 设 none 可关闭思考）。",
+        "tool_calling": "助手消息返回 tool_calls；本地执行后以 role=tool、携带 tool_call_id 与 content 的消息回传结果，再发起下一次请求。",
+        "structured_output": "需要解析响应时将 response_format 设为 {\"type\":\"json_object\"}（JSON 模式）。",
+        "recommended_parameters": {
+          "max_tokens": "普通任务 2048～4096；思考模式建议 ≥ 4096（思考内容和输出共享 max_tokens 配额）",
+          "stream": "长文本生成建议开启，避免请求超时并提升响应体验",
+          "temperature": "一般无需修改，使用默认值 1；创意写作可调高至 1.3-1.5，代码生成可调低至 0.2-0.5",
+          "多轮对话": "只将 content 回传、不回传 reasoning_content，以减少 token 消耗；涉及工具调用时保留 tool_calls、tool_call_id 与对应 content",
+          "模型选择": "日常任务推荐轻量高效的 sensenova-6.8-flash-lite；复杂长链路及专业交付推荐 sensenova-6.8-flash（复杂任务规划、长链路自主执行、深度信息分析、多工具协同更强）"
+        },
+        "usage_limitations": [
+          "不建议同时开启 thinking.type=enabled 与 response_format.type=json_object",
+          "思考模式响应时间较长，建议配合 stream=true 使用以避免超时"
+        ]
+      }
+    },
+    "models": {
+      "path": "/v1/models",
+      "method": "GET",
+      "description": "OpenAI 兼容模型列表端点（提取件仅保留 Model 对象字段说明及 data 数组结构，端点行本身被截断）。",
+      "model_object_fields": {
+        "id": {
+          "type": "string",
+          "description": "模型唯一标识符，API 调用时指定模型用。"
+        },
+        "name": {
+          "type": "string",
+          "description": "模型名称（通常与 id 一致）。"
+        },
+        "created": {
+          "type": "number",
+          "description": "模型创建/发布时间（Unix 时间戳，秒）。"
+        },
+        "description": {
+          "type": "string",
+          "description": "模型功能的文字描述。"
+        },
+        "input_modalities": {
+          "type": "array of string",
+          "description": "支持的输入模态，可选值：text、image。"
+        },
+        "output_modalities": {
+          "type": "array of string",
+          "description": "支持的输出模态，可选值：text、image。"
+        },
+        "context_length": {
+          "type": "number",
+          "description": "最大上下文窗口长度（token 数）。"
+        },
+        "max_output_length": {
+          "type": "number",
+          "description": "单次请求最大输出长度（token 数）。"
+        },
+        "quantization": {
+          "type": "string",
+          "description": "模型量化精度（如 fp8）。"
+        },
+        "pricing": {
+          "type": "object",
+          "description": "定价信息。"
+        },
+        "supported_sampling_parameters": {
+          "type": "array of string",
+          "description": "模型支持的采样参数列表。"
+        },
+        "supported_features": {
+          "type": "array of string",
+          "description": "模型支持的功能特性。"
+        },
+        "hugging_face_id": {
+          "type": "string",
+          "description": "对应的 HuggingFace 模型 ID（如有）。"
+        },
+        "openrouter": {
+          "type": "object",
+          "description": "OpenRouter 路由信息，含 slug 字段。"
+        },
+        "datacenters": {
+          "type": "array of object",
+          "description": "模型部署的数据中心列表，含 country_code 字段。"
+        }
+      }
+    },
+    "images_generations": {
+      "path": "/v1/images/generations",
+      "method": "POST",
+      "description": "同步文生图接口，仅输入文本 prompt 生成图片；独立端点，不是 Chat Completions，不接受图片输入。适用模型：sensenova-u1.5-lite、sensenova-u1.5-fast。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "sensenova-u1.5-lite",
+            "sensenova-u1.5-fast"
+          ],
+          "description": "模型标识，按模型文档固定填写。"
+        },
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "图像生成描述。"
+        },
+        "size": {
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "description": "图像尺寸，2K/4K 分辨率常量；WIDTH 和 HEIGHT 须为 32 的倍数，最小 512、最大 4096，最大比例 3:1 或 1:3；auto 自动适配。建议分辨率：2048x2048(1:1/2K)、2720x1536(16:9/2K)、1536x2720(9:16/2K)、1664x2496(2:3/2K)、2496x1664(3:2/2K)、4096x4096(1:1/4K)。"
+        },
+        "n": {
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "生成图片数量，仅支持值为 1。"
+        },
+        "watermark": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "是否添加 SenseNova 官方 Logo 水印；true 添加，false 生成无水印纯图。无水印当前免费公测、后续将转付费，建议每次请求显式传入以避免默认值变更影响业务。"
+        },
+        "response_format": {
+          "type": "string",
+          "required": false,
+          "default": "b64_json",
+          "enum": [
+            "b64_json",
+            "url"
+          ],
+          "description": "b64_json 返回图片 Base64 内容；url 返回有效期 24 小时的临时下载地址；同一请求所有图片使用相同返回方式；data[].b64_json 与 data[].url 不同时返回。"
+        },
+        "output_format": {
+          "type": "string",
+          "required": false,
+          "default": "png",
+          "enum": [
+            "png",
+            "jpeg",
+            "webp"
+          ],
+          "description": "图片文件格式（生图接口可选 png/jpeg/webp）；不控制结果以 Base64 还是 URL 返回。"
+        },
+        "prompt_extend": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "提示词自动润色优化开关，扩写失败时自动使用原始 prompt。"
+        }
+      },
+      "response": {
+        "structure": "返回 data 数组，图片内容在 data[].b64_json 或 data[].url 中（二者互斥，由 response_format 决定）。提取件中响应 JSON 正文被截断。"
+      },
+      "usage_limitations": [
+        "使用独立图像生成端点，不是 Chat Completions 接口，不支持图像输入",
+        "返回的图片 URL 为临时链接，固定有效期 24 小时，过期后无法再访问",
+        "watermark=false 无水印生成当前免费公测、后续将转付费，建议显式传 watermark"
+      ]
+    },
+    "images_edits": {
+      "path": "/v1/images/edits",
+      "method": "POST",
+      "description": "同步图片编辑接口：输入参考图片 + 编辑提示词，完成图生图/图片改写。适用模型：sensenova-u1.5-fast、sensenova-u1.5-lite。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "sensenova-u1.5-fast",
+            "sensenova-u1.5-lite"
+          ],
+          "description": "模型标识，按模型文档固定填写。"
+        },
+        "images": {
+          "type": "array",
+          "required": true,
+          "description": "图片对象数组，每项包含 image_url；第 1 张为主编辑图，至多支持 5 张参考图。"
+        },
+        "images[].image_url": {
+          "type": "string",
+          "required": true,
+          "description": "完整可公网访问的 HTTP/HTTPS URL 或 Base64 Data URL（格式 data:image/{format};base64,{base64_data}，format 为 png/jpeg 等 MIME 子类型）；必须含完整 Data URL 前缀，不支持纯 Base64 字符串。"
+        },
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "编辑指令，描述期望最终画面；去除首尾空格后不可为空；尽量保留未指定修改的主体元素。"
+        },
+        "n": {
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "生成图片数量，仅支持值为 1。"
+        },
+        "size": {
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "description": "图像尺寸，2K/4K 分辨率常量；WIDTH 和 HEIGHT 须为 32 的倍数，最小 512、最大 4096，最大比例 3:1 或 1:3；auto 自动适配主图。建议分辨率同生图接口。"
+        },
+        "response_format": {
+          "type": "string",
+          "required": false,
+          "default": "b64_json",
+          "enum": [
+            "b64_json",
+            "url"
+          ],
+          "description": "b64_json 返回 Base64；url 返回 24 小时有效期临时链接；同请求全部图片返回同一种格式。"
+        },
+        "output_format": {
+          "type": "string",
+          "required": false,
+          "default": "png",
+          "enum": [
+            "png",
+            "jpg",
+            "jpeg",
+            "webp"
+          ],
+          "description": "输出文件格式，可选 png、jpg、jpeg、webp。"
+        },
+        "watermark": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "是否添加 SenseNova 官方 Logo 水印；true 添加，false 生成无水印纯图。"
+        },
+        "prompt_extend": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "提示词自动润色优化开关，扩写失败时自动使用原始 prompt。"
+        }
+      },
+      "usage_limitations": [
+        "必须传入至少一张输入图片，不支持仅凭 prompt 发起请求",
+        "response_format=url 返回链接有效期 24 小时",
+        "图片输入支持公网 URL（HTTP/HTTPS）与 Base64 Data URL 两种方式，必须含完整 Data URL 前缀",
+        "图片链接无法访问、内容非有效图片或 Base64 解码失败时请求被直接拒绝"
+      ]
+    },
+    "anthropic_messages": {
+      "path": "/v1/messages",
+      "method": "POST",
+      "description": "Anthropic Messages API 兼容端点，适用于使用 Anthropic SDK 或 Claude 生态工具的场景。与 Chat Completions、Responses 共用同一 API Key，通过 Authorization: Bearer Header 传递。",
+      "response_fields": {
+        "content": "内容块数组，包含 thinking（推理过程）与 text（回复文本）类型",
+        "model": "实际使用的模型 ID",
+        "stop_reason": "停止原因：end_turn（自然结束）/ max_tokens（达到最大 Token）/ stop_sequence（命中停止序列）/ tool_use（请求函数调用）",
+        "usage.input_tokens": "输入消耗的 Token 数",
+        "usage.output_tokens": "输出消耗的 Token 数（含思考部分）"
+      },
+      "recommended_parameters": {
+        "max_tokens": "普通任务 2048～4096；思考模式建议 ≥ 4096（思考内容与回答共享 token 配额）",
+        "stream": "长文本生成建议开启，避免请求超时",
+        "temperature": "一般无需修改，使用默认值 1；创意写作可调高至 1.3-1.5，代码生成可调低至 0.2-0.5",
+        "多轮对话": "只回传 content，不回传 reasoning_content，以减少 token 消耗"
+      },
+      "usage_limitations": [
+        "不建议同时开启 thinking.type=enabled 与 response_format.type=json_object",
+        "思考模式响应时间较长，建议配合 stream=true 避免超时",
+        "思考控制差异：Messages API 将 output_config.effort 设为 none 不会关闭思考（与 Chat API 的 reasoning_effort=none 行为不同）"
+      ]
+    },
+    "responses": {
+      "path": "/v1/responses",
+      "method": "POST",
+      "description": "OpenAI Responses API 兼容端点，适用于 OpenAI SDK、Codex 等依赖该协议的工具。与 Chat Completions、Anthropic Messages 共用同一 API Key（Authorization: Bearer）。当前支持模型：sensenova-6.8-flash-lite、deepseek-v4-flash、deepseek-flash（DeepSeek V4.1 Flash）、glm-5.2、kimi-k3。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型 ID，必须显式指定。"
+        },
+        "input": {
+          "type": "string | array",
+          "required": true,
+          "description": "输入内容；字符串等价于一条 role=user 的文本消息，数组按时间线携带完整历史。"
+        },
+        "instructions": {
+          "type": "string | null",
+          "required": false,
+          "default": null,
+          "description": "系统/开发者指令，优先级最高。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "true 时返回 Responses 标准 SSE 事件。"
+        },
+        "max_output_tokens": {
+          "type": "integer | null",
+          "required": false,
+          "default": "模型默认",
+          "description": "最大输出 Token 数（含可见输出及推理 Token），须 > 0；超限时 status=incomplete 且 incomplete_details.reason=max_output_tokens。按模型范围：sensenova-6.8-flash-lite [1,65536]、deepseek-v4-flash [1,384000]、deepseek-flash [1,393216]、glm-5.2 [1,131072]、kimi-k3 [1,1048576]。"
+        },
+        "temperature": {
+          "type": "number | null",
+          "required": false,
+          "default": 1,
+          "description": "采样温度。按模型范围：sensenova-6.8-flash-lite、deepseek-flash [0,2]；deepseek-v4-flash、glm-5.2 [0,2)。"
+        },
+        "top_p": {
+          "type": "number | null",
+          "required": false,
+          "default": "模型默认（同 chat 接口）",
+          "description": "核采样，范围 (0,1]。"
+        },
+        "tools": {
+          "type": "array",
+          "required": false,
+          "default": [],
+          "description": "工具列表，仅支持 type=function。"
+        },
+        "tool_choice": {
+          "type": "string | object",
+          "required": false,
+          "description": "工具选择策略（提取件中该行被截断，具体取值未完整保留）。"
+        },
+        "text": {
+          "type": "object",
+          "required": false,
+          "description": "文本输出配置，用于结构化（JSON）输出。"
+        },
+        "reasoning": {
+          "type": "object",
+          "required": false,
+          "default": "模型默认",
+          "description": "推理配置；推理力度字段为 reasoning.effort（对应 Chat 的 reasoning_effort、Messages 的 output_config.effort）。"
+        },
+        "store": {
+          "type": "boolean",
+          "required": false,
+          "description": "仅接受 false；省略按 false 处理，传 true 返回错误。"
+        },
+        "background": {
+          "type": "boolean",
+          "required": false,
+          "description": "仅接受 false；省略按 false 处理，传 true 返回错误。"
+        }
+      },
+      "function_tool": {
+        "type": {
+          "type": "string",
+          "required": true,
+          "description": "固定为 function。"
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "函数名，1-64 字符，仅限字母、数字、下划线、连字符；同一请求内不可重名。"
+        },
+        "description": {
+          "type": "string | null",
+          "required": false,
+          "default": null,
+          "description": "何时以及如何调用该函数。"
+        },
+        "parameters": {
+          "type": "object | null",
+          "required": false,
+          "description": "入参 JSON Schema（该行默认值在提取件中被截断）；strict 亦可用。"
+        }
+      },
+      "tool_calling": "模型需要工具时 output 中包含 function_call；本地执行后将相关项追加到 input，并追加同 call_id 的 function_call_output，再发起下一次请求。",
+      "response": "非流式返回 Response 对象；流式事件（如 response.created / response.completed）也携带该对象。图片理解调用的输出仍为 message → output_text，本期未新增输出类型。",
+      "usage_limitations": [
+        "无状态兼容模式：不支持响应存储、previous_response_id 续写、Conversations、后台任务、Webhook、上下文压缩",
+        "不提供有状态接口：响应查询、删除、取消及 Input Items 查询均不支持",
+        "内置工具仅支持 function；Web Search、File Search、Code Interpreter、MCP 等不支持",
+        "输入类型不支持视频与 input_file；依赖 Files API 的 input_file/file_id 图片引用不支持",
+        "思考模式耗时较长，建议配合 stream=true 避免超时"
+      ]
+    }
+  },
+  "models": [
+    {
+      "id": "sensenova-6.8-flash",
+      "name": "SenseNova 6.8 Flash",
+      "type": "对话/Agent（文本+图片输入）",
+      "context": "支持 1M 上下文窗口（chat 参数表说明）",
+      "max_output": "max_tokens 默认 64K，取值范围 [1,128K]",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "recommended_params": {
+        "temperature": "默认 1，范围 [0,1]；一般无需修改，创意写作 1.3-1.5、代码 0.2-0.5（推荐口径）",
+        "top_p": "默认 0.95",
+        "max_tokens": "普通任务 2048～4096，思考模式 ≥ 4096",
+        "stream": "长文本/思考模式建议开启"
+      },
+      "endpoints": [
+        "chat_completions"
+      ],
+      "notes": "复杂长链路及专业交付任务推荐（复杂任务规划、长链路自主执行、深度信息分析、多工具协同更强）。思考默认开启且 thinking.type 仅支持 enabled、不支持关闭思考；reasoning_effort 档位 minimal/low/medium/high/xhigh/max，默认 high。"
+    },
+    {
+      "id": "sensenova-6.8-flash-lite",
+      "name": "SenseNova 6.8 Flash Lite",
+      "type": "轻量高效多模态智能体模型，面向真实复杂任务、数据分析与复杂信息呈现",
+      "context": null,
+      "max_output": "Responses 端 max_output_tokens 范围 [1,65536]（OpenCode 配置示例亦用 maxTokens 65536）",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "recommended_params": {
+        "temperature": "Responses 口径范围 [0,2]，默认 1",
+        "max_tokens": "普通任务 2048~4096，思考模式 ≥ 4096",
+        "模型选择": "日常任务推荐此轻量模型"
+      },
+      "endpoints": [
+        "chat_completions",
+        "responses",
+        "anthropic_messages（Anthropic 兼容端点文档以文本对话模型为例，未逐模型列出可用清单）"
+      ],
+      "notes": "多模态 Agent 能力重点提升，主/次 Agent 协作实现演示交付物；思考可切换，thinking.type 控制开关，Chat API 上 reasoning_effort=none 可关闭思考（原生档位 none/low/high/max，映射 minimal→low、medium/xhigh→high、ultra→max）。"
+    },
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek V4.1 Flash（1017 版）",
+      "type": "深度求索新一代高效通用模型：复杂推理、代码开发、多模态理解、多步骤 Agent 任务",
+      "context": null,
+      "max_output": "Responses 端 max_output_tokens 范围 [1,393216]",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "recommended_params": {
+        "temperature": "Responses 口径范围 [0,2]",
+        "max_tokens": "普通任务 2048~4096，思考模式 ≥ 4096"
+      },
+      "endpoints": [
+        "chat_completions",
+        "responses"
+      ],
+      "notes": "552B 参数 MoE 与非对称 Causal-Encoder-Decoder 架构，低激活参数控制计算开销；优化 KV Cache，适合长上下文与高频规模化应用。具备推理、代码、工具调用与视觉理解能力。"
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "type": "对话模型（文档中仅出现于 Responses 兼容 API 支持列表）",
+      "context": null,
+      "max_output": "Responses 端 max_output_tokens 范围 [1,384000]",
+      "modalities": null,
+      "recommended_params": {
+        "temperature": "Responses 口径范围 [0,2)"
+      },
+      "endpoints": [
+        "responses"
+      ],
+      "notes": "提取件中无该模型独立章节。"
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM 5.2",
+      "type": "对话模型（文档中仅出现于 Responses 兼容 API 支持列表）",
+      "context": null,
+      "max_output": "Responses 端 max_output_tokens 范围 [1,131072]",
+      "modalities": null,
+      "recommended_params": {
+        "temperature": "Responses 口径范围 [0,2)"
+      },
+      "endpoints": [
+        "responses"
+      ],
+      "notes": "提取件中无该模型独立章节。"
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "type": "对话模型（文档中仅出现于 Responses 兼容 API 支持列表）",
+      "context": null,
+      "max_output": "Responses 端 max_output_tokens 范围 [1,1048576]",
+      "modalities": null,
+      "recommended_params": null,
+      "endpoints": [
+        "responses"
+      ],
+      "notes": "提取件中无该模型独立章节；温度范围表未包含 kimi-k3。"
+    },
+    {
+      "id": "sensenova-u1.5-lite",
+      "name": "SenseNova U1.5 Lite",
+      "type": "图片创作模型（文生图 + 图片编辑）",
+      "context": null,
+      "max_output": "每次请求 n 仅支持 1 张；size 最大 4K（如 4096x4096）",
+      "modalities": {
+        "input": [
+          "text",
+          "image(编辑时)"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "recommended_params": {
+        "size": "auto 或建议分辨率常量",
+        "watermark": "建议显式传入",
+        "prompt_extend": "默认 true"
+      },
+      "endpoints": [
+        "images_generations",
+        "images_edits"
+      ],
+      "notes": "基于 Neo-unify 架构，统一图像理解/生成/编辑链路，支持参考图创作、局部修改与全局风格布局调整，强化复杂指令与多重约束遵循。"
+    },
+    {
+      "id": "sensenova-u1.5-fast",
+      "name": "SenseNova U1.5 Fast",
+      "type": "图片创作模型加速版（文生图 + 图片编辑）",
+      "context": null,
+      "max_output": "每次请求 n 仅支持 1 张；size 最大 4K（如 4096x4096）",
+      "modalities": {
+        "input": [
+          "text",
+          "image(编辑时)"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "recommended_params": {
+        "size": "auto 或建议分辨率常量",
+        "watermark": "建议显式传入",
+        "prompt_extend": "默认 true"
+      },
+      "endpoints": [
+        "images_generations",
+        "images_edits"
+      ],
+      "notes": "基于 Neo-unify 架构的加速版，兼顾生成质量与响应速度；文字渲染、信息布局与复杂指令遵循增强；编辑支持至多 5 张参考图、auto 尺寸自动适配主图。"
+    }
+  ],
+  "notes": [
+    "渠道 key `sense`（token.sensenova.cn）与 `sense-ai`（token.sensenova.ai）为同一 SenseNova 渠道的国内/海外两个域名，文档与本 schema 通用。",
+    "鉴权统一：所有端点共用同一 API Key，Authorization: Bearer 传递；Base URL 必须以 /v1 结尾，否则报 404 Not Found。",
+    "思考模式字段名三套接口不同：Chat API 用 reasoning_effort（另有 thinking.type 开关），Anthropic Messages API 用 output_config.effort，Responses API 用 reasoning.effort；且 Messages API 上 effort=none 不会关闭思考，Chat API 上 reasoning_effort=none 可关闭思考。",
+    "sensenova-6.8-flash 思考默认开启且不支持关闭（thinking.type 仅 enabled）；OpenAI 兼容模式下不支持 adaptive 取值。",
+    "思考内容与输出共享 max_tokens 配额；思考模式响应慢，建议 stream=true 防超时；不建议同时开启 thinking 与 response_format.type=json_object。",
+    "多轮对话建议只回传 content、不回传 reasoning_content 以省 token；Responses 端则按时间线回传历史，涉及工具调用时保留 function_call 与同 call_id 的 function_call_output。",
+    "chat 的 tool_calls[].function.arguments 是 JSON 格式字符串而非 JSON 对象；role=tool 消息必须携带 tool_call_id。",
+    "候选数量 n：sensenova-6.8-flash chat 支持 [1,7]，另一 chat 参数表标注 [1,4]（提取件未注明所属模型）；生图/改图 n 仅支持 1。",
+    "temperature 各端点/模型范围不一致：chat（6.8-flash）为 [0,1]，Responses 口径 flash-lite/deepseek-flash 为 [0,2]、deepseek-v4-flash/glm-5.2 为 [0,2)，kimi-k3 未列出——写调用代码时按端点分别校验。",
+    "生图与改图是独立同步端点（非 Chat Completions）：generations 不接受图片输入，edits 必须至少一张输入图（首张为主图、至多 5 张参考图）。",
+    "图片 size 约束：宽高须为 32 的倍数、最小 512、最大 4096、比例不超过 3:1；建议 2K/4K 常量分辨率；edits 的 auto 自动适配主图。",
+    "图片返回链接（response_format=url）固定 24 小时过期；watermark=false 目前免费公测、后续将转付费，建议显式传 watermark。",
+    "output_format 枚举在 generations（png/jpeg/webp）与 edits（png/jpg/jpeg/webp）间略有差异。",
+    "Responses API 为无状态兼容（面向 Codex 接入）：store 与 background 仅接受 false，传 true 报错；不支持视频、input_file 及 Files API 图片引用；内置工具仅 function。",
+    "chat tools 目前仅支持函数工具；某模型参数表标注单次请求至多 128 个工具。",
+    "提取件中未见明确限流（RPM/TPM）数值说明；额度管理在 SenseNova 控制台 /console/keys 查看。",
+    "Codex 接入提示：内置模型下拉列表只展示 OpenAI 官方模型，自定义 provider 不出现在菜单中，需用 /model sensenova:<model_id> 切换。"
+  ],
+  "baseUrlVariants": [
+    "https://token.sensenova.cn/v1",
+    "https://token.sensenova.ai/v1"
+  ]
+}

@@ -68,3 +68,9 @@ python3 -m json.tool ~/.pi/agent/models.json > /dev/null
 ```
 
 再确认渠道存在、`baseUrl` 为真实地址、`api` 为 `openai-completions`、`apiKey` 为命令式引用、`models` 中 `id` 唯一且数量与转换结果一致。pi 每次打开 `/model` 时自动重载配置，无需重启。
+
+## classifier（决策模型）不在 models.json 支持范围
+
+`models.json` 的 `models` 条目只能声明聊天模型：`provider-composer.js` 的 `modelFromJson()` 忽略 `type`，一律生成 chat 模型（写入 `type: "classifier"` 也不会注册为 classifier，选中即报错）。
+
+classifier 只能经 provider extension（`~/.pi/agent/extensions/*.ts`）的 `pi.registerProvider()` 注册：条目显式 `type: "classifier"` + `api`（如 `typesafe-system-one`）+ `contextWindow`，provider 级 `compat` 提供 `imageInput`，并按 api 提供 `classifiers` 实现。extension 提供 `models` 会整体替换该 provider 的全部模型，因此应注册为独立 provider。调用入口仅为 codemode 的 `models.classify()`（需 `defaultTools` 含 `+codemode`）或扩展 `ctx.modelRegistry.classify()`，不在 `/model` 中出现。详见 `model-channel-sync` 技能的 `references/pi.md`。

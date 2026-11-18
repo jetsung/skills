@@ -165,3 +165,15 @@ API_KEY="$OPENROUTER_API_KEY"
 > **例外（Sense 渠道）**：渠道 baseUrl 为 `token.sensenova.cn` / `token.sensenova.ai` 时，模型条目**不写 `reasoning` 与 `maxTokens` 两个参数**，已有条目中的这两个参数在同步/清理时一并移除；`contextWindow` 等其它参数照常（见 SKILL.md 渠道特定规则）。
 
 写入时以 pi 现有配置结构为准，仅合并/新增模型条目，保留已有条目不变。文件每次打开 `/model` 时自动重载，编辑后无需重启。
+
+## classifier（决策模型）不在 models.json 支持范围
+
+`models.json` 的 `models` 条目**只能声明聊天模型**：`provider-composer.js` 的 `modelFromJson()` 忽略条目的 `type` 字段，一律生成为 chat 模型。即使写入 `{"type": "classifier", ...}`，registry 也不会把它注册为 classifier（`getModelsOfType("classifier", …)` 返回空），选中即报错。
+
+classifier 只能通过 **provider extension**（`~/.pi/agent/extensions/*.ts`，自动发现）的 `pi.registerProvider(name, config)` 注册：
+
+- `config.models` 中每个条目显式 `type: "classifier"` + `api`（`typesafe-system-one` / `cloudflare-workers-ai-system-one` / `llama-cpp-classify` / `openai-decisions`）+ `contextWindow`（必填）+ `input` + `cost`
+- provider 级 `compat` 是 classifier **唯一**读取 compat 的层级（模型级 `compat` 只对 chat 生效）：System One 服务用 `imageInput` 指定图片格式（`assets` / `images` / `state-image-urls`），TypeSafe 官方图片输入还需要 `sendImageOptInHeader`
+- `classifiers` 按 api 键提供实现。扩展内**不能** import `@earendil-works/pi-ai` 子路径（会被解析到 `pi-ai-extension-view.js` 而失败），需用全局 `fetch` + `options.apiKey` 自行实现 `POST {baseUrl}/systemone`（bool 问题映射为 wire 级 `noul`）
+- extension 一旦提供 `models`，会**整体替换**该 provider 的模型列表（含 `models.json` 中的聊天模型）；因此 classifier 建议注册为独立 provider（如 `amd-classifier`），不要并入已有渠道
+- 调用入口：`codemode` 工具内 `models.getModelOfType("classifier", provider, id)` + `models.classify()`，或扩展的 `ctx.modelRegistry.classify()`；classifier **不出现在 `/model`**，普通对话会话无法选用。codemode 默认关闭，需在 `settings.json` 设 `"defaultTools": ["+codemode"]`

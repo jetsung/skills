@@ -1,0 +1,579 @@
+{
+  "$source": "https://agnes-ai.cn/zh-Hans/docs/agnes-30-flash 、https://agnes-ai.cn/zh-Hans/docs/agnes-25-flash（页面提供 .md 源）",
+  "$extracted_from": "Agnes 官方文档 md 源（wiki.agnes-ai.cn/zh-Hans/docs/*.md；索引 https://wiki.agnes-ai.cn/llms.txt），并参考同站 overview / quickstart / code / pricing / agnes-25-pro / agnes-25-pro-beta / agnes-30-pro / agnes-image-2.0|2.1|2.5-flash / agnes-video-2.5|2.5-flash 页面",
+  "channel": "agnes / agnes-com",
+  "provider": "Agnes AI",
+  "baseUrl": "https://api.agnes-ai.cn/v1",
+  "baseUrlVariants": {
+    "agnes": {
+      "baseUrl": "https://api.agnes-ai.cn/v1",
+      "note": "中国站，官方文档统一 Base URL。"
+    },
+    "agnes-com": {
+      "baseUrl": "https://apihub.agnes-ai.com/v1",
+      "note": "国际站；取自本地 pi 配置并经 chat 实测可用，.cn 官方文档未覆盖该域名。"
+    }
+  },
+  "compatibility": [
+    "OpenAI Chat Completions（/v1/chat/completions）",
+    "OpenAI Responses（/v1/responses）",
+    "Anthropic Messages（/v1/messages，x-api-key 鉴权）",
+    "OpenAI Images 风格生图（/v1/images/generations）",
+    "OpenAI Videos 风格异步视频（POST /v1/videos 创建任务 + GET /agnesapi 轮询）"
+  ],
+  "auth": {
+    "type": "apiKey-bearer",
+    "header": "Authorization: Bearer $AGNES_API_KEY",
+    "anthropicHeader": "x-api-key: $AGNES_API_KEY（仅 Messages 端点）",
+    "description": "同一 API Key 覆盖文本、图像、视频端点；Chat/Responses/图片/视频用 Bearer，Messages 用 x-api-key 并附 anthropic-version: 2023-06-01。",
+    "keyManagement": "在 Agnes AI 控制台创建 API Key；401 时优先检查 Key 与 Base URL 是否正确。"
+  },
+  "endpoints": {
+    "chat_completions": {
+      "path": "/v1/chat/completions",
+      "method": "POST",
+      "description": "OpenAI 兼容对话端点，文本模型统一入口；支持文本与图像 URL 输入、流式输出与函数调用。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型名称，如 agnes-2.5-flash、agnes-3.0-flash、agnes-2.5-pro、agnes-2.5-pro-beta。"
+        },
+        "messages": {
+          "type": "array",
+          "required": true,
+          "description": "对话消息数组，包含 system、user、assistant 角色。"
+        },
+        "messages[].content": {
+          "type": "string | array",
+          "required": true,
+          "description": "纯文本，或包含 text、image_url 的内容块数组。"
+        },
+        "messages[].content[].type": {
+          "type": "string",
+          "enum": ["text", "image_url"],
+          "description": "内容块类型；使用内容块数组时必填。"
+        },
+        "messages[].content[].text": {
+          "type": "string",
+          "description": "文本块内容；type=text 时必填。"
+        },
+        "messages[].content[].image_url.url": {
+          "type": "string",
+          "description": "公开可访问的图像 URL；type=image_url 时必填。"
+        },
+        "temperature": {
+          "type": "number",
+          "required": false,
+          "description": "控制输出随机性，值越低结果越确定；文档未给出范围。"
+        },
+        "top_p": {
+          "type": "number",
+          "required": false,
+          "description": "控制核采样，值越低输出越聚焦；文档未给出范围。"
+        },
+        "max_tokens": {
+          "type": "integer | number",
+          "required": false,
+          "description": "最大输出 Token 数。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "description": "设为 true 时返回流式响应。"
+        },
+        "tools": {
+          "type": "array",
+          "required": false,
+          "description": "函数调用工作流的工具定义（type=function + function.name/description/parameters）。"
+        },
+        "tool_choice": {
+          "type": "string | object",
+          "required": false,
+          "description": "控制模型是否以及如何使用工具。"
+        },
+        "chat_template_kwargs": {
+          "type": "object",
+          "required": false,
+          "description": "Thinking 等兼容扩展能力的扩展字段。"
+        },
+        "chat_template_kwargs.enable_thinking": {
+          "type": "boolean",
+          "required": false,
+          "description": "OpenAI 兼容请求中开启 Thinking 模式。"
+        }
+      },
+      "response": {
+        "structure": "OpenAI 兼容 chat.completion：choices[].message.content 为正文，choices[].message.tool_calls 为工具调用，usage 含 prompt_tokens/completion_tokens/total_tokens。",
+        "finish_reason": "例如 stop；工具调用时读取 message.tool_calls，执行后将结果追加到 messages 再次请求。"
+      }
+    },
+    "responses": {
+      "path": "/v1/responses",
+      "method": "POST",
+      "description": "OpenAI Responses 兼容端点，使用 input 传入纯文本或结构化输入。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型名称。"
+        },
+        "input": {
+          "type": "string | array",
+          "required": true,
+          "description": "纯文本 Prompt，或结构化输入消息数组（内容块用 input_text）。"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "required": false,
+          "description": "最大输出预算；推理模型建议设置较大值，避免 status 变为 incomplete。"
+        }
+      },
+      "response": {
+        "structure": "output 为有序输出项数组：type=reasoning 为推理项，type=message 的 content[] 中 type=output_text 为生成正文。",
+        "notes": [
+          "当前响应不包含顶层 output_text 便捷字段，必须从 output[].content[] 读取。",
+          "推理内容可能位于 content[].reasoning_text 或 summary[].summary_text。",
+          "usage 字段可能为 input_tokens/output_tokens，也可能为 prompt_tokens/completion_tokens，客户端应同时兼容。",
+          "status=incomplete 时检查 incomplete_details，并用更大的 max_output_tokens 重试。"
+        ]
+      }
+    },
+    "messages": {
+      "path": "/v1/messages",
+      "method": "POST",
+      "description": "Anthropic Messages 兼容端点，用于 Anthropic SDK / Claude 生态工具。",
+      "headers": {
+        "x-api-key": "YOUR_API_KEY",
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json"
+      },
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型名称。"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "required": true,
+          "description": "最大输出 Token 预算；推理模型建议设置较大值。"
+        },
+        "messages": {
+          "type": "array",
+          "required": true,
+          "description": "消息数组，支持 user 与 assistant 角色。"
+        },
+        "messages[].content": {
+          "type": "string | array",
+          "required": true,
+          "description": "纯文本或 Anthropic 兼容的内容块数组。"
+        },
+        "system": {
+          "type": "string | array",
+          "required": false,
+          "description": "系统指令。"
+        },
+        "temperature": {
+          "type": "number",
+          "required": false,
+          "description": "控制输出随机性。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "description": "是否返回流式响应。"
+        },
+        "thinking": {
+          "type": "object",
+          "required": false,
+          "description": "Thinking 模式：type=enabled，budget_tokens 为思考预算（常规编码任务建议从 2048 起）。"
+        }
+      },
+      "response": {
+        "structure": "content[] 中 type=text 的内容块为生成正文；stop_reason 为 end_turn / max_tokens 等；usage 含 input_tokens/output_tokens，另可含 cache_creation_input_tokens/cache_read_input_tokens。",
+        "notes": [
+          "stop_reason=max_tokens 时提高 max_tokens 后重试。"
+        ]
+      }
+    },
+    "images_generations": {
+      "path": "/v1/images/generations",
+      "method": "POST",
+      "description": "图像生成与编辑端点，适用 agnes-image-2.0-flash / 2.1-flash / 2.5-flash；不支持 chat。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "enum": ["agnes-image-2.0-flash", "agnes-image-2.1-flash", "agnes-image-2.5-flash"],
+          "description": "图像模型名称。"
+        },
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "图像生成或图像编辑的文本指令。"
+        },
+        "size": {
+          "type": "string",
+          "required": true,
+          "description": "输出尺寸。2.1/2.5 推荐档位 1K、2K、3K、4K（兼容 1024x768 等精确尺寸，不支持的尺寸可能被标准化）；2.0 使用 1024x768 / 1024x1024 / 768x1024 等精确尺寸。"
+        },
+        "ratio": {
+          "type": "string",
+          "required": false,
+          "default": "1:1",
+          "enum": ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"],
+          "description": "2.1/2.5 与档位式 size 配合使用的宽高比。"
+        },
+        "image": {
+          "type": "array of string",
+          "required": "图生图或多图合成必填",
+          "description": "输入图像数组，支持公共图像 URL 或 Data URI Base64；文生图不需要。"
+        },
+        "return_base64": {
+          "type": "boolean",
+          "required": false,
+          "description": "文生图需要以 Base64 返回时使用。"
+        },
+        "extra_body": {
+          "type": "object",
+          "required": false,
+          "description": "高级工作流的附加参数。"
+        },
+        "extra_body.response_format": {
+          "type": "string",
+          "enum": ["url", "b64_json"],
+          "description": "输出格式；必须放在 extra_body 内，不要放在请求体顶层。"
+        }
+      },
+      "size_table": {
+        "1:1": {"1K": "1024x1024", "2K": "2048x2048", "3K": "3072x3072", "4K": "4096x4096"},
+        "3:4": {"1K": "864x1152", "2K": "1728x2304", "3K": "2592x3456", "4K": "3456x4608"},
+        "4:3": {"1K": "1152x864", "2K": "2304x1728", "3K": "3456x2592", "4K": "4608x3456"},
+        "16:9": {"1K": "1312x736", "2K": "2624x1472", "3K": "3936x2208", "4K": "5248x2944"},
+        "9:16": {"1K": "736x1312", "2K": "1472x2624", "3K": "2208x3936", "4K": "2944x5248"},
+        "2:3": {"1K": "832x1248", "2K": "1664x2496", "3K": "2496x3744", "4K": "3328x4992"},
+        "3:2": {"1K": "1248x832", "2K": "2496x1664", "3K": "3744x2496", "4K": "4992x3328"},
+        "21:9": {"1K": "1568x672", "2K": "3136x1344", "3K": "4704x2016", "4K": "6272x2688"}
+      },
+      "usage_limitations": [
+        "1920x1080 / 2560x1440 不是原生输出尺寸，会被映射到最接近的档位（如 16:9 的 1K 输出为 1312x736）；需要 16:9 素材请用 size=2K + ratio=16:9 后自行裁剪。",
+        "图像生成尺寸必须是 16 的倍数，否则可能 500。",
+        "response_format 放在请求体顶层不会生效，必须用 extra_body.response_format。"
+      ]
+    },
+    "videos": {
+      "create": {
+        "path": "/v1/videos",
+        "method": "POST",
+        "description": "创建异步视频生成任务，适用 agnes-video-2.5 / agnes-video-2.5-flash；不支持 chat。"
+      },
+      "query": {
+        "path": "/agnesapi?video_id=<VIDEO_ID>&model_name=<MODEL>",
+        "method": "GET",
+        "description": "轮询任务进度与结果，建议每 1–2 秒查询一次直至 status 为 completed 或 failed；完成后从响应 url 播放或下载。keyframe / reference 模式必须在查询 URL 中带 model_name。"
+      },
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "enum": ["agnes-video-2.5", "agnes-video-2.5-flash"],
+          "description": "视频模型 ID。"
+        },
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "视频内容描述；参考模式可用 <Picture N>、<Audio N>、<Video N> 指代输入素材。"
+        },
+        "mode": {
+          "type": "string",
+          "required": true,
+          "enum": ["text", "keyframe", "reference"],
+          "description": "生成模式：text 纯文本、keyframe 首尾帧控制、reference 图片/音频/视频参考。"
+        },
+        "seconds": {
+          "type": "string",
+          "required": false,
+          "default": "5",
+          "description": "视频时长，支持字符串 \"4\"–\"12\"。"
+        },
+        "size": {
+          "type": "string",
+          "required": false,
+          "description": "输出分辨率档位：agnes-video-2.5 支持 720P / 1080P / 1K / 2K；agnes-video-2.5-flash 固定 720P，其他值返回 400。"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "required": false,
+          "default": "16:9",
+          "description": "画幅比例。"
+        },
+        "seed": {
+          "type": "integer",
+          "required": false,
+          "description": "随机种子，相同种子可提高结果可复现性。"
+        },
+        "n": {
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "生成数量，当前仅支持 1。"
+        },
+        "first_frame": {
+          "type": "string",
+          "required": false,
+          "description": "keyframe 模式首帧图片 URL；与 last_frame 至少提供一个。"
+        },
+        "last_frame": {
+          "type": "string",
+          "required": false,
+          "description": "keyframe 模式尾帧图片 URL；与 first_frame 至少提供一个。"
+        },
+        "images": {
+          "type": "array of string",
+          "required": false,
+          "description": "reference 模式参考图片 URL 列表；agnes-video-2.5 最多 8 张，flash 最多 5 张。"
+        },
+        "audios": {
+          "type": "array of string",
+          "required": false,
+          "description": "reference 模式参考音频 URL 列表，最多 3 段。"
+        },
+        "videos": {
+          "type": "array of object",
+          "required": false,
+          "description": "reference 模式参考视频列表，agnes-video-2.5 最多 1 个；flash 不支持（传入有效内容返回 400）。对象字段：url（必填）、start_seconds（默认 0）、require_audio（默认 false）。"
+        }
+      },
+      "mode_rules": {
+        "text": "不允许 first_frame、last_frame、images、audios、videos。",
+        "keyframe": "first_frame 与 last_frame 至少一个；不允许 images、audios、videos。",
+        "reference": "images、audios、videos 至少一类非空（flash 为 images 或 audios）；不允许 first_frame、last_frame。"
+      },
+      "media_limits": {
+        "agnes-video-2.5": "图片最多 8 张、单张 <15MB、总大小 <50MB、宽高各 256–5760 像素；视频最多 1 个、总时长 2–12 秒、<50MB、24–60 FPS；音频最多 3 段、总时长 2–12 秒、单段 <15MB、总大小 <64MB。",
+        "agnes-video-2.5-flash": "图片最多 5 张，音频最多 3 段，不支持参考视频。",
+        "common": "所有媒体 URL 必须可由 Agnes 服务公网访问，并在任务完成前保持有效；视频生成尺寸必须是 64 的倍数，否则可能 500。"
+      }
+    },
+    "models": {
+      "path": "/v1/models",
+      "method": "GET",
+      "description": "OpenAI 兼容模型列表端点，pi 与 scripts/model_probe.py list 使用；.cn 文档未单独提供该端点说明。"
+    }
+  },
+  "models": [
+    {
+      "id": "agnes-2.5-flash",
+      "name": "Agnes 2.5 Flash",
+      "type": "文本/多模态理解（编码、Agent 工作流）",
+      "status": "已全量上线；替代已废弃的 agnes-2.0-flash",
+      "context": "512K",
+      "max_output": "65.5K（文档另写作 65,536 Token）",
+      "modalities": {"input": ["text", "image_url"], "output": ["text"]},
+      "endpoints": ["chat_completions", "responses", "messages"],
+      "thinking": "OpenAI 兼容用 chat_template_kwargs.enable_thinking；Anthropic 用 thinking.type/thinking.budget_tokens（常规编码任务建议从 2048 起）。",
+      "pricing": {
+        "currency": "CNY",
+        "unit": "百万 Token",
+        "list": {"cached_input": 0.035, "input": 0.35, "output": 1.0},
+        "promo": {"cached_input": 0, "input": 0, "output": 0},
+        "note": "体验价当前三项均为 0。"
+      }
+    },
+    {
+      "id": "agnes-3.0-flash",
+      "name": "Agnes 3.0 Flash",
+      "type": "新一代文本模型（Agent 编程、工具编排、长任务执行）",
+      "status": "已上线",
+      "context": "512K",
+      "max_output": "65,536 Token",
+      "modalities": {"input": ["text", "image_url"], "output": ["text"]},
+      "endpoints": ["chat_completions", "responses", "messages"],
+      "thinking": "OpenAI 兼容用 chat_template_kwargs.enable_thinking；Anthropic 用 thinking.type/thinking.budget_tokens。",
+      "pricing": {
+        "currency": "CNY",
+        "unit": "百万 Token",
+        "list": {"cached_input": 0.035, "input": 0.35, "output": 1.0},
+        "promo": {"cached_input": 0, "input": 0, "output": 0},
+        "note": "体验价当前三项均为 0。"
+      }
+    },
+    {
+      "id": "agnes-2.5-pro",
+      "name": "Agnes 2.5 Pro",
+      "type": "付费推理模型（高级编码、科学推理、长上下文、Agent 工作流）",
+      "status": "已上线；agnes-2.5-pro-beta 的商业化稳定版本",
+      "released": "2026-08-01",
+      "context": "1M tokens",
+      "max_output": "65536 tokens",
+      "modalities": {"input": ["text", "image_url"], "output": ["text"]},
+      "endpoints": ["chat_completions", "responses", "messages"],
+      "thinking": "推理模型；Responses 建议设置较大的 max_output_tokens，Anthropic 同理设置较大的 max_tokens。",
+      "pricing": {
+        "currency": "CNY",
+        "unit": "百万 Token",
+        "list": {"cached_input": 0.3, "input": 3.0, "output": 6.0},
+        "promo": {"cached_input": 0.3, "input": 3.0, "output": 6.0},
+        "note": "按 Pro 系列刊例价计费，无体验价。"
+      }
+    },
+    {
+      "id": "agnes-2.5-pro-beta",
+      "name": "Agnes 2.5 Pro Beta",
+      "type": "付费推理模型（高级推理、编码、长上下文）",
+      "status": "已正式上线；请求参数、响应格式、文本协议与上下文限制与 2.5 Pro 系列一致",
+      "context": "1M tokens",
+      "max_output": "65536 tokens",
+      "modalities": {"input": ["text", "image_url"], "output": ["text"]},
+      "endpoints": ["chat_completions", "responses", "messages"],
+      "pricing": {
+        "currency": "CNY",
+        "unit": "百万 Token",
+        "list": {"cached_input": 0.07, "input": 0.7, "output": 2.1},
+        "promo": {"cached_input": 0.07, "input": 0.7, "output": 2.1},
+        "note": "无体验价。"
+      }
+    },
+    {
+      "id": "agnes-3.0-pro",
+      "name": "Agnes 3.0 Pro",
+      "type": "新一代 Pro 模型（智能体工作任务、专业文档分析、科学编码、长上下文推理）",
+      "status": "即将上线；文档用于提前准备接入，响应为格式示例，不代表当前可用",
+      "modalities": {"input": ["text", "image_url"], "output": ["text"]},
+      "endpoints": ["chat_completions", "responses", "messages"],
+      "pricing": {
+        "currency": "CNY",
+        "unit": "百万 Token",
+        "list": {"cached_input": 0.3, "input": 3.0, "output": 6.0},
+        "promo": {"cached_input": 0.3, "input": 3.0, "output": 6.0},
+        "note": "上线时间以正式公告为准。"
+      }
+    },
+    {
+      "id": "agnes-image-2.0-flash",
+      "name": "Agnes Image 2.0 Flash",
+      "type": "图像生成/编辑",
+      "endpoints": ["images_generations"],
+      "required_params": ["model", "prompt", "size"],
+      "size": "精确尺寸写法，如 1024x768 / 1024x1024 / 768x1024",
+      "image": "图生图必填，公网 URL 或 Data URI Base64；参数表列为 image，文档重要说明要求放在 extra_body.image 中传入；文生图不需要 image。",
+      "notes": ["图生图不需要 tags: [\"img2img\"]。", "response_format 放 extra_body 内。"],
+      "pricing": {
+        "currency": "CNY",
+        "list": {"1K_per_k": 70, "2K_per_k": 120, "3K_per_k": 140, "4K_per_k": 160, "extra_input_image": 0.02},
+        "promo": "当前所有输出分辨率与输入参考图片均为 0。",
+        "note": "第 4 张起的输入参考图片 ¥0.02/张。"
+      }
+    },
+    {
+      "id": "agnes-image-2.1-flash",
+      "name": "Agnes Image 2.1 Flash",
+      "type": "图像生成/编辑（高信息密度图像）",
+      "endpoints": ["images_generations"],
+      "required_params": ["model", "prompt", "size"],
+      "size": "档位 1K / 2K / 3K / 4K；兼容精确尺寸但可能被标准化。",
+      "ratio": ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"],
+      "image": "图生图或多图合成必填，公网 URL 或 Data URI Base64。",
+      "pricing": {
+        "currency": "CNY",
+        "list": {"1K_per_k": 70, "2K_per_k": 120, "3K_per_k": 140, "4K_per_k": 160, "extra_input_image": 0.02},
+        "promo": "当前所有输出分辨率与输入参考图片均为 0。"
+      }
+    },
+    {
+      "id": "agnes-image-2.5-flash",
+      "name": "Agnes Image 2.5 Flash",
+      "type": "图像生成/编辑（最新一代，能力超过 2.1）",
+      "endpoints": ["images_generations"],
+      "required_params": ["model", "prompt", "size"],
+      "size": "档位 1K / 2K / 3K / 4K；兼容精确尺寸但可能被标准化。",
+      "ratio": ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"],
+      "image": "图生图或多图合成必填，公网 URL 或 Data URI Base64。",
+      "pricing": {
+        "currency": "CNY",
+        "list": {"1K_per_k": 70, "2K_per_k": 120, "3K_per_k": 140, "4K_per_k": 160, "extra_input_image": 0.02},
+        "promo": "当前所有输出分辨率与输入参考图片均为 0。"
+      }
+    },
+    {
+      "id": "agnes-video-2.5",
+      "name": "Agnes Video 2.5",
+      "type": "视频生成（异步，文生视频/首尾帧/多模态参考）",
+      "endpoints": ["videos"],
+      "required_params": ["model", "prompt", "mode"],
+      "supported_sizes": ["720P", "1080P", "1K", "2K"],
+      "modes": ["text", "keyframe", "reference"],
+      "pricing": {
+        "currency": "CNY",
+        "list": {"720P_per_s": 0.15, "1080P_per_s": 0.25, "1K_per_s": 0.25, "2K_per_s": 0.35, "extra_input_image": 0.03},
+        "note": "总计费时长 = 输出视频时长 + 输入视频时长；输入图片前 5 张免费，第 6 张起 ¥0.03/张。"
+      }
+    },
+    {
+      "id": "agnes-video-2.5-flash",
+      "name": "Agnes Video 2.5 Flash",
+      "type": "视频生成（异步，轻量版）",
+      "endpoints": ["videos"],
+      "required_params": ["model", "prompt", "mode"],
+      "supported_sizes": ["720P"],
+      "modes": ["text", "keyframe", "reference"],
+      "notes": ["size 固定 720P，其他值返回 400。", "reference 模式图片最多 5 张、音频最多 3 段，不支持参考视频。"],
+      "pricing": {
+        "currency": "CNY",
+        "list": {"720P_per_s": 0.15},
+        "promo": {"720P_per_s": 0},
+        "note": "采用与 Video 2.5 相同的计费公式，限时免费期间所有计费项为 0。"
+      }
+    }
+  ],
+  "retired": [
+    {
+      "id": "agnes-2.0-flash",
+      "note": "已废弃，现有集成迁移到 agnes-2.5-flash；不要继续作为兼容回退。"
+    }
+  ],
+  "limits": {
+    "free_tier_rpm": 20,
+    "image_size_multiple": 16,
+    "video_size_multiple": 64,
+    "context_and_output": {
+      "agnes-2.5-flash": {"context": 524288, "max_output": 65536},
+      "agnes-3.0-flash": {"context": 524288, "max_output": 65536},
+      "agnes-2.5-pro": {"context": 1048576, "max_output": 65536},
+      "agnes-2.5-pro-beta": {"context": 1048576, "max_output": 65536}
+    }
+  },
+  "errors": {
+    "400": "请求参数无效、缺少必填参数、上下文超限、第三方工具请求格式不兼容（含把图像/视频模型发到 chat/completions）。",
+    "401": "鉴权失败：Key 错误/过期/缺失 Authorization。",
+    "402": "账户余额或可用配额不足。",
+    "403": "无权访问该模型，或地区/网络受限；API Key 配额不足也会表现为 403。",
+    "404": "API 地址、路径或模型不存在；常见原因是 Base URL 缺失 /v1 或被重复追加 /v1。",
+    "405": "HTTP 方法不正确。",
+    "408": "请求超时。",
+    "409": "重复提交或任务状态冲突。",
+    "413": "请求体过大（上下文过长或 base64 图像过大）。",
+    "415": "文件格式或 Content-Type 不受支持。",
+    "422": "参数值不符合模型要求（seed、分辨率、宽高比、图像 URL 不可访问等）。",
+    "429": "超出 RPM 限制；免费用户 RPM 20，等待约 1 分钟后重试。",
+    "500": "服务器内部错误；图像尺寸须为 16 的倍数，视频尺寸须为 64 的倍数。",
+    "502": "网关/代理未收到有效上游响应。",
+    "503": "服务暂不可用或第三方工具配置错误（模型名、模型列表、回退模型、路由）。",
+    "504": "网关等待上游超时。",
+    "520": "未知错误，多与网络/上游波动有关。",
+    "522": "网关连接上游超时。",
+    "524": "上游处理超时。"
+  },
+  "notes": [
+    "渠道 key `agnes`（api.agnes-ai.cn）与 `agnes-com`（apihub.agnes-ai.com）为同一 Agnes AI 中国站/国际站两个 baseUrl，文档与本 schema 通用；按 baseUrl 主机判定渠道，勿按 key 判定。",
+    "文本模型均可走 Chat Completions / Responses / Messages 三套协议；Thinking 字段名不同：OpenAI 兼容请求用 chat_template_kwargs.enable_thinking，Anthropic Messages 用 thinking.type + budget_tokens。",
+    "Responses 无顶层 output_text，须从 output[].type=message 的 content[] 中 type=output_text 读取；token 字段需同时兼容 input_tokens/output_tokens 与 prompt_tokens/completion_tokens。",
+    "图像模型只走 /v1/images/generations，视频模型只走 /v1/videos + /agnesapi 轮询，均不支持 chat；实测 chat 分别返回 400 \"is an image model\" / \"is a video model\"，不得写入 pi/omp（见两份 SKILL 的渠道特定规则）。",
+    "agnes-3.0-pro 文档标注即将上线，agnes-2.0-flash 已废弃，均不得写入平台配置。",
+    "平台写入约束：agnes 与 agnes-com（国际版）均只保留 flash 文本模型，id 去掉可选 agnes-com/ 前缀后须匹配 ^agnes-\\d+(\\.\\d+)*-flash$（当前即 agnes-2.5-flash、agnes-3.0-flash）；agnes-*-pro / *-pro-beta / *-pro-alpha 与 image / video 模型一律不写入，存量非 flash 条目在同步/清理时一并移除。",
+    "agnes-2.5-pro-alpha 无独立文档页；2.5 Pro 页仅说明其官方权重以 Apache 2.0 许可证在 Hugging Face 开源，接入参数以 /models 返回为准。",
+    "免费/优惠：2.5-flash 与 3.0-flash 的缓存命中/输入/输出体验价当前均为 ¥0；Pro 系列按刊例价计费；图像 2.0/2.1/2.5 当前全档位免费；video-2.5-flash 限时免费，video-2.5 按秒计费。价格随活动调整，以账户账单为准。",
+    "Base URL 必须含 /v1；第三方工具重复追加 /v1 会返回 404（官方错误码页明确）。"
+  ]
+}

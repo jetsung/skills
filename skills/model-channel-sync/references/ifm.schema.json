@@ -1,0 +1,550 @@
+{
+  "$source": "https://docs.ifm.ai/#/chat-completions",
+  "$extracted_from": "https://docs.ifm.ai/docs/ 下的 chat-completions、model-catalog、introduction、jais-3、jais-asr、reasoning、custom-function-calling、streaming、structured-output、multi-turn、session-routing、transcription、limits、errors、migration、deprecation、pi 等页面（Markdown 源，2026-10-29 更新）",
+  "channel": "ifm",
+  "provider": "IFM（Institute of Foundation Models, MBZUAI）",
+  "baseUrl": "https://api.ifm.ai/v1",
+  "compatibility": [
+    "OpenAI Chat Completions 兼容（/v1/chat/completions）",
+    "OpenAI Audio Transcriptions 兼容（/v1/audio/transcriptions，multipart/form-data）",
+    "OpenAI 兼容模型列表（/v1/models，文档未单列该端点）"
+  ],
+  "auth": {
+    "type": "apiKey-bearer",
+    "header": "Authorization: Bearer $IFM_API_KEY",
+    "description": "所有 IFM 托管模型共用同一 Base URL 与 API Key，通过 Authorization: Bearer Header 传递。",
+    "keyManagement": "在 IFM Platform（https://platform.ifm.ai/api-keys）创建 API Key；环境变量示例 IFM_API_KEY。pi 中 apiKey 可写成 $IFM_API_KEY 由环境展开。"
+  },
+  "endpoints": {
+    "chat_completions": {
+      "path": "/v1/chat/completions",
+      "method": "POST",
+      "description": "IFM 对话与推理模型的主文本生成端点，完全兼容 OpenAI Chat Completions API。托管可用的聊天模型：IFM/K2-Horizon-375B-A23B、IFM/Jais-3-MoVA-36B-A4B。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型标识，如 IFM/K2-Horizon-375B-A23B、IFM/Jais-3-MoVA-36B-A4B（id 含斜杠）。"
+        },
+        "messages": {
+          "type": "array",
+          "required": true,
+          "description": "消息列表，角色为 system / user / assistant / tool；仅支持文本内容。"
+        },
+        "messages[].role": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "description": "消息角色。"
+        },
+        "messages[].content": {
+          "type": "string",
+          "required": true,
+          "description": "消息文本内容（文档标注为 Text content only）。工具调用轮次中 assistant 的 content 可为空。"
+        },
+        "messages[].reasoning_content": {
+          "type": "string",
+          "required": false,
+          "description": "回放历史 assistant 轮次时必填：必须逐字回传模型返回的推理轨迹；空字符串 \"\" 也是有效值，应保留而不是丢弃或传 null。字段名与 vLLM、SGLang 一致。"
+        },
+        "messages[].reasoning": {
+          "type": "string",
+          "required": false,
+          "description": "reasoning_content 的镜像字段（兼容旧客户端）；二者发送其一即可，同时发送无害。"
+        },
+        "messages[].tool_calls": {
+          "type": "array",
+          "required": false,
+          "description": "回放工具调用轮次时保留；结构与 OpenAI 一致（id、type=function、function.name、function.arguments）。"
+        },
+        "messages[].tool_call_id": {
+          "type": "string",
+          "required": false,
+          "description": "role=tool 消息必填，对应 assistant 轮次中 tool_calls[].id。"
+        },
+        "temperature": {
+          "type": "float",
+          "required": false,
+          "description": "采样温度，范围 0–2。K2 Horizon 默认 1.0、推荐 1.0；Jais 3 默认 0.2，思考模式下英文推荐 1.0、阿拉伯语推荐 0.7。"
+        },
+        "top_p": {
+          "type": "float",
+          "required": false,
+          "description": "核采样阈值。K2 Horizon 默认 1.0、推荐 0.95；Jais 3 为 0.95。"
+        },
+        "top_k": {
+          "type": "integer",
+          "required": false,
+          "description": "扩展参数。Jais 3 推荐 20。"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "required": false,
+          "default": "剩余上下文长度",
+          "description": "单次补全的最大 token 数，默认取剩余上下文。"
+        },
+        "stop": {
+          "type": "string | array",
+          "required": false,
+          "description": "停止序列，至多 4 个。"
+        },
+        "seed": {
+          "type": "integer",
+          "required": false,
+          "description": "随机种子，对相同请求提供尽力而为的确定性。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "description": "true 时以 SSE 流式返回（OpenAI 兼容 chunk 结构）。"
+        },
+        "tools": {
+          "type": "array",
+          "required": false,
+          "description": "标准 OpenAI 函数工具定义数组（type=function，含 name/description/parameters），无需 IFM 专用适配。"
+        },
+        "tool_choice": {
+          "type": "string | object",
+          "required": false,
+          "default": "auto（存在 tools 时）",
+          "description": "工具选择策略：auto 由模型决定；none 不调用；required 至少调用一个；也可用对象强制指定某个函数（模型仍自行选择参数）。"
+        },
+        "tool_presentation_format": {
+          "type": "string",
+          "required": false,
+          "description": "K2 Horizon 的自定义函数调用格式参数，迁移文档要求设为 \"xml\"（与 tool_call_format 同时设置）。"
+        },
+        "tool_call_format": {
+          "type": "string",
+          "required": false,
+          "description": "K2 Horizon 的自定义函数调用格式参数，迁移文档要求设为 \"xml\"。"
+        },
+        "frequency_penalty": {
+          "type": "float",
+          "required": false,
+          "description": "为兼容性接受，但对生成无实际影响。"
+        },
+        "logprobs": {
+          "type": "boolean",
+          "required": false,
+          "description": "为兼容性接受，但响应中不返回。"
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "required": false,
+          "default": "high",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "推理力度。K2 Horizon 支持 low/medium/high；Jais 3（IFM/Jais-3-MoVA-36B-A4B）不支持 medium。文档的 Reasoning 页说明该值通过 chat_template_kwargs 传入（如 chat_template_kwargs.reasoning_effort），Chat 参数表将其列为扩展参数。"
+        },
+        "chat_template_kwargs": {
+          "type": "object",
+          "required": false,
+          "description": "chat 模板参数对象；reasoning_effort 在此对象内传递，例如 {\"reasoning_effort\": \"high\"}。"
+        },
+        "response_format": {
+          "type": "object",
+          "required": false,
+          "description": "输出格式约束。{\"type\":\"json_object\"} 保证输出为合法 JSON（不约束结构）；{\"type\":\"json_schema\"} 约束为指定 JSON Schema，K2 Horizon 支持。"
+        },
+        "response_format.json_schema": {
+          "type": "object",
+          "required": false,
+          "description": "JSON Schema 模式配置，含 name、strict、schema；深层嵌套或晦涩字段名会消耗 token 并降低回答质量。"
+        }
+      },
+      "response": {
+        "structure": "OpenAI Chat Completions 响应对象：choices[].message 含 content、reasoning_content（及镜像字段 reasoning）、tool_calls；choices[].finish_reason 取 stop / length / tool_calls。",
+        "fields": {
+          "id": "响应唯一标识（如 chatcmpl-acd8436fe38e4520）",
+          "model": "实际使用的模型 ID",
+          "choices[].message.content": "回复文本",
+          "choices[].message.reasoning_content": "推理轨迹（与 content 分离；多轮必须逐字回放）",
+          "choices[].message.reasoning": "reasoning_content 的镜像字段",
+          "choices[].message.tool_calls": "模型选择调用的工具列表；finish_reason=tool_calls 时 content 为空",
+          "choices[].finish_reason": "stop（正常结束）/ length（达到 max_tokens 等上限）/ tool_calls（发起工具调用）",
+          "usage.prompt_tokens": "输入 token 数",
+          "usage.completion_tokens": "输出 token 数",
+          "usage.total_tokens": "总 token 数",
+          "usage.prompt_tokens_details.cached_tokens": "命中缓存的前缀 token 数",
+          "usage.completion_tokens_details.reasoning_tokens": "推理 token 数"
+        },
+        "recommended_parameters": {
+          "K2 Horizon": "temperature 1.0、top_p 0.95（默认 1.0/1.0）",
+          "K2 Horizon 0.9B": "temperature 0.6、top_p 0.95（仅开源权重，不在托管 API）",
+          "Jais 3": "temperature 默认 0.2；思考模式英文 1.0、阿拉伯语 0.7；top_p 0.95；top_k 20；min_p 0.0、presence_penalty 0.0、repetition_penalty 1.0",
+          "reasoning_effort": "high 为推荐档"
+        },
+        "reasoning_tokens": {
+          "low": "推理轨迹以 <ifm|think_faster> 结束",
+          "medium": "推理轨迹以 <ifm|think_fast> 结束",
+          "high": "推理轨迹以 <ifm|think> 结束"
+        },
+        "usage_limitations": [
+          "模型无状态：每次请求必须携带完整对话历史。",
+          "assistant 轮次必须逐字回放 reasoning_content（空串 \"\" 也保留），否则多轮请求可能返回 HTTP 400。",
+          "复述的推理内容计入 prompt token，长会话会更快消耗每日配额。",
+          "流式响应不可恢复；连接中断需从最后一个完整轮次重发。"
+        ]
+      }
+    },
+    "audio_transcriptions": {
+      "path": "/v1/audio/transcriptions",
+      "method": "POST",
+      "description": "语音转文本端点，兼容 OpenAI 音频转写 API；请求体为 multipart/form-data。适用模型：IFM/Jais-ASR。",
+      "request": {
+        "file": {
+          "type": "file",
+          "required": true,
+          "description": "待转写音频文件。支持格式：flac、mp3、ogg/oga（Vorbis 或 Opus）、wav（PCM 16/24-bit）、webm（Opus）；立体声会下混为单声道。"
+        },
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "转写模型 ID，如 IFM/Jais-ASR。"
+        },
+        "language": {
+          "type": "string",
+          "required": false,
+          "description": "语言或方言提示（不区分大小写）。建议省略以启用自动识别；显式设置会关闭检测并回显所填值（language=ar 例外：仍会在 MSA 与各方言间检测）。"
+        },
+        "code_switch": {
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "true 时阿拉伯语语音中的外语词以拉丁字母书写；false 时转写为阿拉伯字母。"
+        },
+        "diacritics": {
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "true 时阿拉伯语输出带变音符号（tashkeel）。"
+        },
+        "max_completion_tokens": {
+          "type": "integer",
+          "required": false,
+          "default": 1024,
+          "description": "每段（约 30 秒音频）的最大生成 token 数；最大 2048。默认值几乎总够用；若响应 truncated=true 可调高。"
+        }
+      },
+      "response": {
+        "fields": {
+          "text": "转写文本；未检测到语音时为空",
+          "language": "检测到的语言标签，始终带方括号（如 [msa]、[EG]）；无语音时为 null",
+          "no_speech": "未检测到语音时为 true",
+          "truncated": "token 预算耗尽导致该段文本不完整时为 true",
+          "duration_seconds": "音频总时长（秒；超过 30 秒分段时返回）",
+          "segments": "分段数组（超过 30 秒时返回），每项含 start、end、text、language、no_speech、truncated"
+        },
+        "chunking": "超过 30 秒的音频自动在低能量点（如停顿）切分为约 30 秒的片段；顶层 text 为全部分段拼接。"
+      },
+      "language_codes": {
+        "ar": "阿拉伯语（含全部支持方言；未知方言时使用，响应仍报告检测到的方言或 MSA）",
+        "msa": "现代标准阿拉伯语",
+        "en": "英语",
+        "fr": "法语",
+        "es": "西班牙语",
+        "it": "意大利语",
+        "dialects": [
+          "DZ（阿尔及利亚）",
+          "BH（巴林）",
+          "EG（埃及）",
+          "IQ（伊拉克）",
+          "JO（约旦）",
+          "KW（科威特）",
+          "LB（黎巴嫩）",
+          "LY（利比亚）",
+          "MR（毛里塔尼亚）",
+          "MA（摩洛哥）",
+          "OM（阿曼）",
+          "PS（巴勒斯坦）",
+          "QA（卡塔尔）",
+          "SA（沙特）",
+          "SD（苏丹）",
+          "SY（叙利亚）",
+          "TN（突尼斯）",
+          "AE（阿联酋）",
+          "YE（也门）"
+        ]
+      },
+      "usage_limitations": [
+        "最大文件 32 MB，最长音频 15 分钟。",
+        "OpenAI SDK 中 code_switch、diacritics、max_completion_tokens 需通过 extra_body 传递；language、no_speech、truncated、duration_seconds、segments 需从 result.model_extra 读取。",
+        "IFM/Jais-ASR 仅适用于语音转写，不能作为聊天模型使用（chat/completions 实测返回 400：This API endpoint is not configured for the selected model.）。"
+      ]
+    }
+  },
+  "models": [
+    {
+      "id": "IFM/K2-Horizon-375B-A23B",
+      "name": "K2 Horizon 375B A23B",
+      "type": "前沿推理与长程 Agent（托管 API 的主力模型）",
+      "architecture": "Sparse MoE",
+      "context": "512K",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "languages": "English, Arabic, 30+ more",
+      "license": "Apache 2.0",
+      "pretrain_data_cutoff": "December 2025",
+      "hosted_api": true,
+      "endpoints": [
+        "chat_completions"
+      ],
+      "recommended_params": {
+        "temperature": "1.0（默认 1.0）",
+        "top_p": "0.95（默认 1.0）",
+        "reasoning_effort": "low/medium/high，默认 high；high 推荐",
+        "tools": "tool_presentation_format 与 tool_call_format 均设为 \"xml\""
+      },
+      "notes": "K2 Horizon 系列六个开源权重尺寸中唯一在托管 API 提供的 375B 稀疏 MoE 版本；面向前沿推理与长程 Agent 任务。"
+    },
+    {
+      "id": "IFM/Jais-3-MoVA-36B-A4B",
+      "name": "Jais 3 MoVA 36B A4B",
+      "type": "阿拉伯语专用 Agent 模型（托管 API 可用）",
+      "architecture": "MoVA + MoE",
+      "context": "512K",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": true,
+      "endpoints": [
+        "chat_completions"
+      ],
+      "recommended_params": {
+        "temperature": "默认 0.2；思考模式英文 1.0、阿拉伯语 0.7",
+        "top_p": "0.95",
+        "top_k": "20",
+        "min_p": "0.0",
+        "presence_penalty": "0.0",
+        "repetition_penalty": "1.0",
+        "reasoning_effort": "low/high（不支持 medium）"
+      },
+      "notes": "基于 K2 Horizon 架构，面向多步任务规划、工具调用、阿拉伯语文档编辑与搜索的 Agent 能力。"
+    },
+    {
+      "id": "IFM/Jais-ASR",
+      "name": "Jais ASR",
+      "type": "阿拉伯语语音识别（Speech-to-text）",
+      "architecture": "Speech-to-text（基于 IFM/Jais-3-4B）",
+      "context": null,
+      "modalities": {
+        "input": [
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "languages": "Arabic + Multiple Arabic Dialects, English, French, Spanish, Italian",
+      "hosted_api": true,
+      "endpoints": [
+        "audio_transcriptions"
+      ],
+      "limits": "最大 32 MB / 最长 15 分钟",
+      "notes": "支持方言识别、语码切换、可选阿拉伯语变音符号与无语音检测；不走 Chat Completions。"
+    },
+    {
+      "id": "IFM/K2-Horizon-MoVA-36B-A4B",
+      "name": "K2 Horizon MoVA 36B A4B",
+      "architecture": "MoVA + MoE",
+      "context": "512K",
+      "languages": "English, Arabic, 30+ more",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重（Hugging Face），不提供托管 API；适合生产式服务实验。"
+    },
+    {
+      "id": "IFM/K2-Horizon-32B",
+      "name": "K2 Horizon 32B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "English, Arabic, 30+ more",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重；适合长上下文与推理实验。"
+    },
+    {
+      "id": "IFM/K2-Horizon-7B",
+      "name": "K2 Horizon 7B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "English, Arabic, 30+ more",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重；适合微调与成本敏感部署。"
+    },
+    {
+      "id": "IFM/K2-Horizon-3.7B",
+      "name": "K2 Horizon 3.7B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "English, Arabic, 30+ more",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重；适合高效研究与单节点服务。"
+    },
+    {
+      "id": "IFM/K2-Horizon-0.9B",
+      "name": "K2 Horizon 0.9B",
+      "architecture": "Dense decoder-only",
+      "context": "128K",
+      "languages": "English, Arabic, 30+ more",
+      "hosted_api": false,
+      "endpoints": [],
+      "recommended_params": {
+        "temperature": "0.6（默认 0.6）",
+        "top_p": "0.95"
+      },
+      "notes": "仅开源权重；面向本地开发与评测演练，采样推荐与其它 K2 Horizon 尺寸不同。"
+    },
+    {
+      "id": "IFM/Jais-3-375B-A23B",
+      "name": "Jais 3 375B A23B",
+      "architecture": "Sparse MoE",
+      "context": "512K",
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重；托管 API 未提供。"
+    },
+    {
+      "id": "IFM/Jais-3-32B",
+      "name": "Jais 3 32B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重。"
+    },
+    {
+      "id": "IFM/Jais-3-7B",
+      "name": "Jais 3 7B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重。"
+    },
+    {
+      "id": "IFM/Jais-3-3.7B",
+      "name": "Jais 3 3.7B",
+      "architecture": "Dense decoder-only",
+      "context": "512K",
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重。"
+    },
+    {
+      "id": "IFM/Jais-3-0.9B",
+      "name": "Jais 3 0.9B",
+      "architecture": "Dense decoder-only",
+      "context": "128K",
+      "languages": "Arabic + Multiple Arabic Dialects + English",
+      "hosted_api": false,
+      "endpoints": [],
+      "notes": "仅开源权重。"
+    }
+  ],
+  "retired": {
+    "models": [
+      {
+        "model": "MBZUAI-IFM/K2-Think-V2",
+        "replacement": "IFM/K2-Horizon-375B-A23B",
+        "effective": "2026-10-03"
+      },
+      {
+        "model": "inceptionai/Jais-2-8B-Chat",
+        "replacement": "IFM/Jais-3-MoVA-36B-A4B",
+        "effective": "2026-10-14"
+      },
+      {
+        "model": "inceptionai/Jais-2-70B-Chat",
+        "replacement": "IFM/Jais-3-MoVA-36B-A4B",
+        "effective": "2026-10-14"
+      }
+    ],
+    "baseUrls": [
+      {
+        "baseUrl": "api.jaischat.ai/v1",
+        "replacement": "api.ifm.ai/v1",
+        "effective": "2026-10-14"
+      },
+      {
+        "baseUrl": "api.k2think.ai/v1",
+        "replacement": "api.ifm.ai/v1",
+        "effective": "2026-10-03"
+      }
+    ]
+  },
+  "limits": {
+    "daily_token_cap": "每个 API Key 每日 10,000,000 tokens（prompt + completion 合计），00:00 UTC 重置",
+    "minute_guards": "平台另有每分钟请求/token 保护阈值，数值未公开，远高于正常应用流量",
+    "rate_limit_headers": [
+      "x-ratelimit-limit-tokens",
+      "x-ratelimit-remaining-tokens",
+      "x-ratelimit-limit-tokens-daily",
+      "x-ratelimit-remaining-tokens-daily",
+      "x-ratelimit-reset-tokens",
+      "Retry-After（429 时返回，单位秒）"
+    ]
+  },
+  "errors": {
+    "400": "invalid_request_error：JSON 格式错误、缺少必填字段或参数值非法（不重试）",
+    "401": "authentication_error：API Key 缺失或无效（不重试）",
+    "403": "permission_error：Key 有效但无权访问该模型/端点/区域（不重试）",
+    "404": "not_found_error：模型 ID 或端点路径不存在（不重试）",
+    "408": "timeout_error：请求超过服务端时限，缩短提示词或降低 max_tokens（退避重试）",
+    "410": "deprecated_model_error：模型已到退役日期，错误体带迁移指南 URL（不重试）",
+    "413": "request_too_large：请求体超限或提示词超出上下文窗口（不重试）",
+    "422": "validation_error：语义非法请求，如工具 schema 格式错误或参数组合不支持（不重试）",
+    "429": "rate_limit_error：触发速率或配额限制，按 Retry-After 等待后指数退避重试",
+    "499": "request_cancelled：客户端在响应完成前断开，不计费（可重试）",
+    "500": "api_error：内部错误，带抖动指数退避重试",
+    "502/504": "upstream_error：网关或上游推理节点失败/超时，退避重试",
+    "503": "service_unavailable：部署或容量事件导致暂不可用，退避重试",
+    "529": "overloaded_error：服务满载，积极退避并加抖动重试"
+  },
+  "notes": [
+    "统一 Base URL：https://api.ifm.ai/v1（旧域名 api.jaischat.ai/v1、api.k2think.ai/v1 已退役）；Base URL 错误会返回 404。",
+    "API Key 在 IFM Platform 创建，所有托管模型共用；请求头 Authorization: Bearer $IFM_API_KEY。",
+    "托管可用的聊天模型只有 IFM/K2-Horizon-375B-A23B 与 IFM/Jais-3-MoVA-36B-A4B；其余 K2 Horizon / Jais 3 尺寸仅开源权重。",
+    "IFM/Jais-ASR 只走 /v1/audio/transcriptions，不支持 chat/completions。",
+    "模型无状态：每次请求必须携带完整对话历史；assistant 轮次必须逐字回放 reasoning_content（空字符串保留），否则多轮请求可能 400。",
+    "reasoning 与 reasoning_content 同值：reasoning_content 为规范字段（与 vLLM/SGLang 一致），reasoning 为旧客户端兼容镜像。",
+    "推理力度通过 chat_template_kwargs.reasoning_effort 传递：K2 Horizon 支持 low/medium/high，Jais 3 不支持 medium；默认 high。",
+    "K2 Horizon 的自定义函数调用需把 tool_presentation_format 与 tool_call_format 都设为 \"xml\"；工具定义与响应结构保持标准 OpenAI 形态。",
+    "工具调用：finish_reason=tool_calls 时 content 为空，每个 tool_calls 条目都需各自回一条 role=tool 消息；工具参数为 JSON 字符串。",
+    "结构化输出：response_format={type:json_object} 保证合法 JSON；K2 Horizon 另支持 json_schema（strict）。约束只作用于 content，reasoning_content 永远不是 JSON；schema 无法满足时通常表现为 finish_reason=length 而非报错。",
+    "流式：OpenAI 兼容 SSE chunk，content 与 reasoning 分开的 delta；工具参数分片到达，需按 tool_calls[i].index 聚合后再解析 JSON；最后一块带 finish_reason，随后 [DONE]；流不可恢复。",
+    "会话亲和：可选请求头 X-Session-ID（每会话稳定、不可猜测、不跨用户共享），将同一会话路由到同一 worker 以复用 KV 缓存；属尽力而为的延迟优化，不改变结果，也不能替代完整历史。",
+    "限流：每 Key 每日 10,000,000 tokens，00:00 UTC 重置；超限返回 429 rate_limit_error 并带 Retry-After；分钟级保护阈值未公开。",
+    "pi 接入（官方示例）：provider key 用 ifm；api 固定 openai-completions；apiKey 可写 $IFM_API_KEY；compat.supportsDeveloperRole 必须 false（IFM 拒绝 developer 角色）；compat.requiresReasoningContentOnAssistantMessages 必须 true（每轮回放推理字段）；models[].reasoning 必须 true；contextWindow/maxTokens 不写时 pi 会默认 128K 上下文与 16.4K 输出上限。",
+    "pi 的模型引用按第一个斜杠拆分：ifm/IFM/K2-Horizon-375B-A23B → provider=ifm、model=IFM/K2-Horizon-375B-A23B。",
+    "GET /v1/models 为 OpenAI 兼容端点（文档未单列）；2026-11 实测返回 IFM/K2-Horizon-375B-A23B、IFM/Jais-3-MoVA-36B-A4B、IFM/Jais-ASR 三个模型，且无 pricing/上下文等元数据字段。",
+    "模型 id 自带 IFM/ 前缀且含斜杠，同步到各平台时保持原样，不得去除前缀。"
+  ]
+}

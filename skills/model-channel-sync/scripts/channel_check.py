@@ -92,17 +92,20 @@ def _probe(base_url, api_key, timeout, models=None):
     必须 chat 实测通过（HTTP 200 有 choices，或 429 限流）才判可用。"""
     if not base_url:
         return {'ok': False, 'reason': 'baseUrl 为空'}
-    ids, models_note = _probe_models(base_url, api_key, timeout)
+    ids, created, models_note = _probe_models(base_url, api_key, timeout)
     if ids is None:
         return {'ok': False, 'reason': models_note}  # /models 端点级失败
+    created_note = {'model_created': created} if created else {}
     # 候选模型：显式传入 > /models 实时列表 > 渠道自带列表
     candidates = list(models or []) or ids[:3]
     if not candidates:
-        return {'ok': True, 'reason': '端点可达（无候选模型，未做 chat 实测）', 'model_ids': ids}
+        return {'ok': True, 'reason': '端点可达（无候选模型，未做 chat 实测）',
+                'model_ids': ids, **created_note}
     chat = _probe_chat(base_url, api_key, candidates, timeout)
     if not chat['ok']:
-        return {'ok': False, 'reason': chat['reason'], 'model_ids': ids}
-    return {'ok': True, 'reason': chat['reason'], 'model_ids': ids, 'chat_model': chat.get('chat_model')}
+        return {'ok': False, 'reason': chat['reason'], 'model_ids': ids, **created_note}
+    return {'ok': True, 'reason': chat['reason'], 'model_ids': ids,
+            'chat_model': chat.get('chat_model'), **created_note}
 
 def _curl_get(url, api_key, timeout):
     """curl 后备请求（GET）：urllib TLS 握手失败（如 OpenSSL 版本与服务器不兼容）
@@ -144,32 +147,44 @@ def _curl_post(url, api_key, body, timeout):
         return 0, resp, f'curl 响应无 HTTP 码: {out[:80]}'
 
 
-def _parse_ids(body):
-    """从 /models 响应解析模型 id 列表。"""
+def _parse_models(body):
+    """从 /models 响应解析 (模型 id 列表, {id: created})；结构不符返回 (None, {})。
+    created 缺失的模型不写入映射（后续按"无时间数据"处理）。"""
     try:
         data = json.loads(body)
         if isinstance(data, dict) and isinstance(data.get('data'), list):
-            return [m['id'] for m in data['data'] if isinstance(m, dict) and m.get('id')]
-        return []
+            ids, created = [], {}
+            for m in data['data']:
+                if isinstance(m, dict) and m.get('id'):
+                    ids.append(m['id'])
+                    if m.get('created'):
+                        created[m['id']] = m['created']
+            return ids, created
+        return None, {}
     except (json.JSONDecodeError, TypeError):
-        return None
+        return None, {}
+
+
+def _parse_ids(body):
+    """从 /models 响应解析模型 id 列表。"""
+    return _parse_models(body)[0]
 
 
 def _probe_models(base_url, api_key, timeout):
-    """GET {baseUrl}/models。返回 (模型 id 列表, '' )；端点级失败返回 (None, 原因)。
-    优先 curl（TLS 栈更通用，部分服务器对 urllib 握手挂起）；urllib 作为兜底。
-    HTTP 405 / 无 data 数组但 HTTP 200 → 端点可达但无模型列表，返回 ([], '')。"""
+    """GET {baseUrl}/models。返回 (模型 id 列表, {id: created}, 失败原因)；端点级失败返回
+    (None, {}, 原因)。优先 curl（TLS 栈更通用，部分服务器对 urllib 握手挂起）；urllib 作为兜底。
+    HTTP 405 / 无 data 数组但 HTTP 200 → 端点可达但无模型列表，返回 ([], {}, '')。"""
     url = base_url.rstrip('/') + '/models'
     code, body, cerr = _curl_get(url, api_key, timeout)
     if not cerr:
         if code == 405:
-            return [], ''
+            return [], {}, ''
         if code == 429:
-            return [], '429'
+            return [], {}, '429'
         if code == 200:
-            ids = _parse_ids(body)
-            return (ids if ids is not None else []), ''
-        return None, f'HTTP {code}（鉴权失败或端点错误）{(": " + body[:120]) if body else ""}'
+            ids, created = _parse_models(body)
+            return (ids or []), created, ''
+        return None, {}, f'HTTP {code}（鉴权失败或端点错误）{(": " + body[:120]) if body else ""}'
     # curl 不可用 → urllib 兜底
     headers = {'User-Agent': 'model-channel-sync/1.0', 'Accept': 'application/json'}
     if api_key:
@@ -178,23 +193,23 @@ def _probe_models(base_url, api_key, timeout):
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = r.read()
-        ids = _parse_ids(body)
-        return (ids if ids is not None else []), ''
+        ids, created = _parse_models(body)
+        return (ids or []), created, ''
     except urllib.error.HTTPError as e:
         if e.code == 405:
-            return [], ''
+            return [], {}, ''
         if e.code == 429:
-            return [], '429'
+            return [], {}, '429'
         detail = ''
         try:
             detail = e.read().decode('utf-8', 'replace')[:120]
         except Exception:
             pass
-        return None, f'HTTP {e.code}（鉴权失败或端点错误）{(": " + detail) if detail else ""}'
+        return None, {}, f'HTTP {e.code}（鉴权失败或端点错误）{(": " + detail) if detail else ""}'
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return None, f'连接失败: {e}'
+        return None, {}, f'连接失败: {e}'
     except json.JSONDecodeError:
-        return None, '响应非 JSON（端点不兼容）'
+        return None, {}, '响应非 JSON（端点不兼容）'
 
 
 def _probe_chat(base_url, api_key, candidates, timeout):

@@ -1,0 +1,428 @@
+{
+  "$source": "https://docs.maritaca.ai/pt/api/openai-compatibilidade",
+  "$extracted_from": "Maritaca AI 官方文档（Docusaurus 站点，葡萄牙语；2026-11-08 抓取）。主页面 /pt/api/openai-compatibilidade，补充页面 /pt/api/comeco-rapido（快速开始/密钥）、/pt/responses-api（Responses API 参数与示例）、/pt/modelos（模型清单与规格表）。页面代码块为 Python / cURL 双标签页，WebFetch 默认只返回 Python 标签，cURL 块由页面 HTML 反转义后提取，故本 schema 的端点完整 URL 以 cURL 示例为准。/pt/modelos 规格表于 2026-11-08 复核更新：新增「Modelos da geração anterior」分组，S5 / S5 Free / S5 BR-SP 最大输出由 32K 更正为 64K。",
+  "channel": "maritaca",
+  "provider": "Maritaca AI（Sabiá / S5 系列模型）",
+  "baseUrl": "https://chat.maritaca.ai/api",
+  "compatibility": [
+    "兼容 OpenAI 客户端库：pip install openai 后用 openai.OpenAI(api_key=..., base_url=\"https://chat.maritaca.ai/api\") 接入，Sabiá 模型可用于任何使用 OpenAI 库的程序",
+    "OpenAI Responses API 兼容（官方推荐接口；cURL 示例完整路径 https://chat.maritaca.ai/api/v1/responses，Responses 文档对比表标为 POST /v1/responses）。注意：该端点对请求体做严格校验（extra=forbid），OpenAI Responses 状态字段（store / background / previous_response_id 等）一律被拒（见 endpoints.responses.usage_limitations）；Chat Completions 端点同样严格，pi 接入须设 compat.supportsStore=false（见 endpoints.chat_completions.usage_limitations）",
+    "OpenAI Chat Completions API 兼容（仍可用，新项目建议改用 Responses；cURL 示例完整路径 https://chat.maritaca.ai/api/chat/completions，Responses 文档对比表标为 POST /v1/chat/completions）",
+    "Sabiá 为开源模型家族（modelos de código aberto）；其中 S5-nano 明确为开放权重（Hugging Face: maritaca-ai/S5-nano）"
+  ],
+  "auth": {
+    "type": "apiKey-bearer",
+    "header": "Authorization: Bearer $MARITACA_API_KEY",
+    "description": "所有端点共用同一 API Key，通过 Authorization: Bearer Header 传递。文档 cURL 示例写作 `Authorization: Bearer minha_chave`（minha_chave 为密钥占位符）；Python SDK 示例写作 `api_key=os.environ.get(\"MARITACA_API_KEY\")` 或 `api_key=\"SUA_CHAVE_API\"`，同时附 `Content-Type: application/json`。",
+    "keyManagement": "在 Maritaca 平台 https://plataforma.maritaca.ai/ 登录后，到 https://plataforma.maritaca.ai/chaves-de-api 点击「Criar nova chave」创建密钥并妥善保存；快速开始示例把密钥粘贴到 `minha_chave` 变量。"
+  },
+  "endpoints": {
+    "responses": {
+      "path": "https://chat.maritaca.ai/api/v1/responses",
+      "pathRelative": "/v1/responses",
+      "method": "POST",
+      "description": "官方主推接口：单一端点承载文本生成、函数调用、结构化输出与多轮对话。文档各示例（简单提问、消息列表、流式、函数调用、结构化输出）均以 model=\"sabia-4\" 展示。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型标识。文档示例统一用 sabia-4；完整可用模型名与别名见 /pt/modelos（models 段）。"
+        },
+        "input": {
+          "type": "string | array",
+          "required": false,
+          "description": "输入内容。字符串用于单轮直接提问（等价于一条 user 文本消息）；数组用于携带完整对话历史或工具调用项。快速开始示例中 `input` 可省略参数名以外的必填性未明确标注，实际各示例均带 input。"
+        },
+        "input[].role": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "user",
+            "assistant",
+            "system",
+            "developer"
+          ],
+          "description": "消息角色：用户 / 模型 / 系统指令 / 开发者指令（Responses 文档「Formatos de entrada」明确列出这四种）。"
+        },
+        "input[].content": {
+          "type": "string",
+          "required": false,
+          "description": "消息文本内容，与 role 搭配构成一条消息，如 {\"role\": \"user\", \"content\": \"Meu nome é Alice.\"}。"
+        },
+        "input[].type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "function_call",
+            "function_call_output"
+          ],
+          "description": "回传工具调用结果时的条目类型（见下方 function_calling 流程）。"
+        },
+        "instructions": {
+          "type": "string",
+          "required": false,
+          "description": "专门的系统/开发者指令参数，替代在消息列表里放 system 消息；Responses 文档建议用它把模型行为与对话内容分离。示例：\"Você é um agente de viagem. Seja descritivo e gentil.\"。"
+        },
+        "stream": {
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "是否流式返回。默认 false（等模型生成完整响应后一次返回）；true 时按 Responses 标准 SSE 事件逐字返回。cURL 流式示例传 \"stream\": true。"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "required": false,
+          "description": "最大输出 Token 数。文档示例取值 8000（openai-compatibilidade 页）与 200（responses-api 迁移示例）；文档未给出取值范围/默认值。"
+        },
+        "reasoning": {
+          "type": "object",
+          "required": false,
+          "description": "推理配置（S5 系列）。Responses 文档示例写作 `reasoning={\"effort\": \"low\"}`，用 reasoning.effort 调整推理强度；另见 notes 中模型页的顶层字段差异。"
+        },
+        "reasoning.effort": {
+          "type": "string",
+          "required": false,
+          "description": "推理力度。Responses 文档示例取值 \"low\"；/pt/modelos 对 S5 给出的枚举为 none / low / medium / xhigh，默认 xhigh（见 notes）。"
+        },
+        "tools": {
+          "type": "array",
+          "required": false,
+          "description": "工具定义列表，仅见 type=function 形式（Responses 文档函数调用示例）。"
+        },
+        "tools[].type": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "function"
+          ],
+          "description": "工具类型，固定 function。"
+        },
+        "tools[].name": {
+          "type": "string",
+          "required": false,
+          "description": "函数名，如 consultar_previsao_tempo。"
+        },
+        "tools[].description": {
+          "type": "string",
+          "required": false,
+          "description": "函数用途描述。"
+        },
+        "tools[].parameters": {
+          "type": "object",
+          "required": false,
+          "description": "函数入参的 JSON Schema，含 type/properties/required（示例用 {\"type\":\"object\", ...}）。"
+        },
+        "text": {
+          "type": "object",
+          "required": false,
+          "description": "文本输出配置，用于结构化输出。Responses 文档对比表指出 Chat 的 response_format 在此对应 text.format。"
+        },
+        "text.format": {
+          "type": "object",
+          "required": false,
+          "description": "结构化输出格式。文档示例：{\"type\": \"json_schema\", \"name\": \"extracted_events\", \"schema\": <Pydantic model_json_schema()>, \"strict\": true}；更多取值（json_object、strict）见 /pt/structured-outputs。"
+        }
+      },
+      "function_tool": {
+        "type": {
+          "type": "string",
+          "required": true,
+          "description": "固定为 function。"
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "函数名称。"
+        },
+        "description": {
+          "type": "string",
+          "required": false,
+          "description": "何时/如何调用该函数。"
+        },
+        "parameters": {
+          "type": "object",
+          "required": false,
+          "description": "入参 JSON Schema。"
+        }
+      },
+      "function_calling": "模型需要工具时 output 首项为 type=\"function_call\"，含 name / arguments（JSON 格式字符串）/ call_id；本地执行后，在下次请求的 input 中依次追加同 call_id 的 function_call 项与 type=\"function_call_output\"（含 call_id 与 output 字符串），再带上 tools 发起请求得到最终回复。",
+      "response": {
+        "structure": "非流式返回 Response 对象；文本读取为 response.output[0].content[0].text，S5 推理模型可直接用 response.output_text。",
+        "reasoning_s5": "S5 系列 output 首项为 reasoning 项，推理内容以 encrypted_content 加密；S5-nano 为开放权重，推理以明文文本放在 content 中、不加密。多轮接续推理可用 previous_response_id 或把 output 项回传进 input。",
+        "streaming_events": {
+          "response.output_text.delta": "主事件，event.delta 为逐字生成的文本片段",
+          "response.created": "响应创建",
+          "response.completed": "响应完成；event.response.usage 含 input_tokens / output_tokens / total_tokens",
+          "response.failed": "出错时替代 response.completed 发出"
+        },
+        "migration_from_chat": "messages → input；system 消息 → instructions；max_tokens → max_output_tokens；choices[0].message.content → output[0].content[0].text；流式 chat.completion.chunk → response.output_text.delta 等；tool_calls → output 中类型化的 function_call；response_format → text.format（json_schema）。"
+      },
+      "usage_limitations": [
+        "请求体严格校验（FastAPI / Pydantic extra=forbid）：出现未声明字段即返回 422，错误形如 {\"detail\":[{\"loc\":[\"body\",\"store\"],\"msg\":\"extra fields not permitted\",\"type\":\"value_error.extra\"}]}。是字段本身被禁止，传 store=false 同样被拒。",
+        "OpenAI Responses API 的有状态/额外字段（store、background、previous_response_id、include、truncation、parallel_tool_calls 等）均不在支持范围；官方为无状态兼容实现，文档只演示 model / input / instructions / stream / max_output_tokens / reasoning / tools / text。",
+        "pi 等使用 api=\"openai-responses\" 的客户端默认会发送 store 字段，接入此端点必然触发上述 422；supportsStore 是 openai-completions 的 compat 字段（pi 官方文档中 openai-responses 的字段表无此项），Responses 端点下无法用它关闭。pi 接入建议一律走 Chat Completions 端点并配 compat.supportsStore=false（见 endpoints.chat_completions.usage_limitations）。"
+      ]
+    },
+    "chat_completions": {
+      "path": "https://chat.maritaca.ai/api/chat/completions",
+      "pathRelative": "/v1/chat/completions",
+      "method": "POST",
+      "description": "OpenAI Chat Completions 兼容端点，仍在维护且可用，但官方明确「新项目推荐 Responses API」，已有可用集成无需立即迁移。cURL 示例未显式写 -X POST，靠 -d 隐式发起 POST。",
+      "request": {
+        "model": {
+          "type": "string",
+          "required": true,
+          "description": "模型标识，示例用 sabia-4。"
+        },
+        "messages": {
+          "type": "array",
+          "required": true,
+          "description": "消息列表，示例含 role=system 与 role=user 两条。"
+        },
+        "messages[].role": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "system",
+            "user"
+          ],
+          "description": "消息角色；文档示例只出现 system 与 user。"
+        },
+        "messages[].content": {
+          "type": "string",
+          "required": true,
+          "description": "消息文本内容。"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "required": false,
+          "description": "最大输出 Token 数；cURL 与 Python 示例均取 8000，迁移示例取 200。文档未给出取值范围/默认值。"
+        }
+      },
+      "response": {
+        "structure": "标准 OpenAI Chat Completions 响应，文本读取为 response.choices[0].message.content。",
+        "streaming": "Responses 文档对比表列出流式事件为 chat.completion.chunk（本页未提供 Chat 流式示例）。",
+        "structured_output": "按对比表，Chat 侧用 response_format（对应 Responses 的 text.format）。"
+      },
+      "usage_limitations": [
+        "请求体同样严格校验（FastAPI / Pydantic extra=forbid）：出现未声明字段即返回 422 {\"detail\":[{\"loc\":[\"body\",\"store\"],\"msg\":\"extra fields not permitted\",\"type\":\"value_error.extra\"}]}。实测确认：带 store（无论 true/false）→ 422，去掉 → 200。",
+        "pi 的 openai-completions 实现在 compat.supportsStore 为真时会主动往请求体加 store: false（pi-ai dist/api/openai-completions.js: `if (compat.supportsStore) params.store = false`）；该字段默认 auto-detected from URL，不在 pi catalog 的自定义 provider 会被判为 true，因此**即使 api=openai-completions 也会中招**。修复：provider 级或模型级设 `compat: {\"supportsStore\": false}`，api 与 baseUrl 均不用改。",
+        "实测其余 pi 默认字段均被接受（HTTP 200）：max_completion_tokens、stream_options.include_usage、stream:true、temperature、max_tokens；故只需关掉 supportsStore 一个开关，无需额外 compat 覆盖。",
+        "Responses 端点（/api/v1/responses）同样的 extra=forbid 限制，且 supportsStore 不是 openai-responses 的 compat 字段，无法用开关关闭；pi 接入优先选本端点。"
+      ]
+    }
+  },
+  "models": [
+    {
+      "id": "S5",
+      "aliases": [
+        "S5",
+        "s5"
+      ],
+      "name": "S5",
+      "type": "最智能的旗舰模型：文档/数据分析、复杂问题求解、带工具执行的助手",
+      "context": "1M（100 万 tokens）",
+      "max_output": "64K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "recommended_params": {
+        "reasoning_effort": "枚举 none / low（或 minimal）/ medium / xhigh（或 high），默认 xhigh（/pt/modelos 原文，low 与 minimal、xhigh 与 high 为等价别名）；Responses 页示例另用 reasoning.effort"
+      },
+      "notes": "支持 Batch API；推理内容在 Responses 输出的 reasoning 项中以 encrypted_content 加密返回。示例用途：文档分析与综合、信息抽取、工具任务自动化、结构化内容生成。"
+    },
+    {
+      "id": "S5-br-sp",
+      "aliases": [
+        "S5-br-sp",
+        "s5-br-sp"
+      ],
+      "name": "S5 BR-SP",
+      "type": "与 S5 相同，但推理与处理 100% 在巴西境内完成（数据主权/驻留）",
+      "context": "1M",
+      "max_output": "64K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "能力、上下文与训练数据与 S5 一致，成本高 30%。"
+    },
+    {
+      "id": "S5-free",
+      "aliases": [
+        "S5-free",
+        "s5-free"
+      ],
+      "name": "S5 Free",
+      "type": "限时免费的 S5，用于零成本体验",
+      "context": "1M",
+      "max_output": "64K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "官方标注「限时发布优惠，可能随时终止」，生产/长期使用应改用 S5。仅接受文本（Aceita somente texto），不含 Batch API、Flex 与内置工具（ferramentas integradas），rate limits 为固定值（见 /pt/rate-limits）。这是官方文档中唯一的免费模型。"
+    },
+    {
+      "id": "S5-nano",
+      "aliases": [
+        "S5-nano",
+        "s5-nano"
+      ],
+      "name": "S5 Nano",
+      "type": "S5 紧凑版、开放权重（maritaca-ai/S5-nano），家族中成本最低",
+      "context": "256K",
+      "max_output": "32K",
+      "pricing": {
+        "input": "R$ 0,10 / 1M tokens",
+        "output": "R$ 0,60 / 1M tokens"
+      },
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "具备与 S5 相同的原生推理；因是开放权重模型，推理以明文文本（content）返回、不加密。支持函数调用、内置工具与 Batch API。适用场景：高并发分类/信息抽取、快速应答、Agent 路由与分诊、成本与延迟优先的简单任务。"
+    },
+    {
+      "id": "sabia-4-thinking",
+      "aliases": [
+        "sabia-4-thinking"
+      ],
+      "name": "Sabiá 4 Thinking",
+      "type": "Sabiá 家族推理模型， Portuguese/巴西语境前沿质量、评测模型中成本最低",
+      "context": "1M",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "相对 Sabiá 4 在工具使用、法律任务与回答质量上有明显提升；适合受益于显式推理的复杂任务。支持 Batch API。示例用途：多步问题求解、Agent 流程与工具使用、法律分析与撰写、考试与技术推理题。"
+    },
+    {
+      "id": "sabia-4-thinking-br-sp",
+      "aliases": [
+        "sabia-4-thinking-br-sp"
+      ],
+      "name": "Sabiá 4 Thinking BR-SP",
+      "type": "与 Sabiá 4 Thinking 相同，100% 巴西境内推理与处理",
+      "context": "1M",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "能力、上下文与训练数据一致，成本高 30%。"
+    },
+    {
+      "id": "sabia-4",
+      "aliases": [
+        "sabia-4",
+        "sabia-4-2026-01-06"
+      ],
+      "name": "Sabiá 4",
+      "type": "通用模型，侧重 Agent 能力与巴西语境，兼顾精度与成本效率",
+      "context": "128K",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "openai-compatibilidade、responses-api、comeco-rapido 各页示例统一使用的模型。技术报告见 arXiv:2603.10213。示例用途：法律文书起草与审阅、考试辅导、长文档分析与综合、多步 Agent 流程编排。"
+    },
+    {
+      "id": "sabia-4-br-sp",
+      "aliases": [
+        "sabia-4-br-sp"
+      ],
+      "name": "Sabiá 4 BR-SP",
+      "type": "与 Sabiá 4 相同，100% 巴西境内推理与处理",
+      "context": "128K",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "能力、上下文与训练数据一致，成本高 30%。"
+    },
+    {
+      "id": "sabiazinho-4",
+      "aliases": [
+        "sabiazinho-4",
+        "sabiazinho-4-2026-01-06",
+        "sabia-4-small",
+        "sabiazim-4"
+      ],
+      "name": "Sabiazinho 4",
+      "type": "面向大规模应用优化：速度、低成本与良好精度，Agent 流程表现更佳",
+      "context": "128K",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "具备巴西法律语境知识。示例用途：法律文书撰写与审阅、合同分析、巴西法律解释与适用、文档分类与信息抽取、大规模教育评估、多步任务自动化。快速开始的 maritalk 示例用 model=\"sabiazinho-4\"。"
+    },
+    {
+      "id": "sabiazinho-4-br-sp",
+      "aliases": [
+        "sabiazinho-4-br-sp"
+      ],
+      "name": "Sabiazinho 4 BR-SP",
+      "type": "与 Sabiazinho 4 相同，100% 巴西境内推理与处理",
+      "context": "128K",
+      "max_output": "32K",
+      "endpoints": [
+        "responses",
+        "chat_completions"
+      ],
+      "notes": "能力、上下文与训练数据一致，成本高 30%。"
+    }
+  ],
+  "retired": [
+    {
+      "id": "sabia-2-medium",
+      "shutdown": "2024-10-01",
+      "replacement": "sabiazinho-4"
+    },
+    {
+      "id": "sabia-2-small",
+      "shutdown": "2025-01-15",
+      "replacement": "sabiazinho-4"
+    },
+    {
+      "id": "sabia-3-2024-07-15",
+      "shutdown": "2024-10-01",
+      "replacement": "sabiazinho-4"
+    },
+    {
+      "id": "sabia-3-2024-09-09",
+      "shutdown": "2025-02-17",
+      "replacement": "sabiazinho-4"
+    },
+    {
+      "id": "sabiazinho-3-2024-11-13",
+      "shutdown": "2025-03-06",
+      "replacement": "sabiazinho-4"
+    }
+  ],
+  "notes": [
+    "【pi 接入：必须设 compat.supportsStore=false】maritaca 的 /api/chat/completions 与 /api/v1/responses 都用 Pydantic extra=forbid 严格校验，禁止 store 字段（连 store=false 也拒）。pi 的 openai-completions 实现在 compat.supportsStore 为真时会主动加 store: false，而该字段默认 auto-detected from URL、自定义 provider 被判为 true，因此即使 `api: \"openai-completions\"` 也会 422 `extra fields not permitted`（loc=[\"body\",\"store\"]）。修复只需在 maritaca provider 加 `\"compat\": {\"supportsStore\": false}`，api 与 baseUrl 保持 `https://chat.maritaca.ai/api` 不变；实测带 store→422、去掉→200，且 max_completion_tokens / stream_options.include_usage / stream:true / temperature 均被接受，无需其它 compat 覆盖。",
+    "渠道定位：Maritaca AI 是巴西的模型提供商，Sabiá / S5 系列主打葡萄牙语与巴西语境；技术文档为葡萄牙语。baseUrl 统一为 https://chat.maritaca.ai/api（注意结尾是 /api，不是 /v1）。",
+    "端点路径存在文档内不一致，写调用代码或排查 404 时优先按 cURL 示例的完整 URL：Responses 为 https://chat.maritaca.ai/api/v1/responses、Chat Completions 为 https://chat.maritaca.ai/api/chat/completions；而 /pt/responses-api 的对比表把两者标为 POST /v1/responses 与 POST /v1/chat/completions（相对路径），且 SDK 示例 base_url 只到 /api。三者口径未统一，本 schema 如实并列，不做裁决。",
+    "官方推荐用 Responses API 作为新项目的主接口，Chat Completions 继续可用但不再推荐；两者都兼容 OpenAI SDK。迁移要点：messages→input、system 消息→instructions、max_tokens→max_output_tokens、choices[0].message.content→output[0].content[0].text。",
+    "本次抓取的官方文档未提供 GET /models 端点说明；模型清单以 /pt/modelos 文档页为准（本 schema models 段）。SKILL 的 model_probe.py list / pi_cache 端点探测若接入此渠道，需先实测 /models 是否可用，未确认前不要假设存在实时模型列表。",
+    "免费模型仅 S5-free / s5-free，且是限时发布优惠、可能随时终止；仅文本输入、固定 rate limits、不含 Batch API / Flex / 内置工具。按 SKILL 的免费模型筛选规则，可用 free-tag/keyword 命中 -free，但需实测（HTTP 429 视为可用）。",
+    "模型 id 有大小写与别名：S5 系列同时接受大写开头（S5、S5-free、S5-nano）与全小写（s5、s5-free、s5-nano）；sabia-4 另有带日期别名 sabia-4-2026-01-06；sabiazinho-4 另有 sabiazinho-4-2026-01-06、sabia-4-small、sabiazim-4。同步时保留文档给出的别名，勿擅自改写前缀。",
+    "-br-sp 后缀的五个变体为「100% 巴西境内推理/数据驻留」版本，能力、上下文与训练数据与原版一致，成本高 30%；按业务是否需要数据主权决定是否使用。",
+    "推理力度字段两处表述不同：/pt/modelos 对 S5 写作顶层参数 reasoning_effort，取值 none / low（或 minimal）/ medium / xhigh（或 high）、默认 xhigh；/pt/responses-api 示例写作嵌套 reasoning={\"effort\": \"low\"}。写调用代码时按所用端点分别校验。",
+    "S5 系列推理内容在 Responses 的 output 中以 reasoning 项返回且加密（encrypted_content）；S5-nano 因开放权重，推理以明文文本放在 content 中、不加密。多轮接续推理可用 previous_response_id 或回传 output 项。",
+    "上下文与最大输出（/pt/modelos「Especificações」表，2026-11-08 复核）：S5 / S5 Free / S5 BR-SP 为 1M 上下文 + 64K 最大输出；S5 Nano 为 256K 上下文 + 32K；「Modelos da geração anterior」分组（Sabiá 4 Thinking / Sabiá 4 Thinking BR-SP / Sabiá 4 / Sabiá 4 BR-SP / Sabiazinho 4 / Sabiazinho 4 BR-SP）为 1M 或 128K 上下文、最大输出一律 32K。pi 的 maxTokens 应按模型对应取值：S5-free 为 65536（64K），上一代模型为 32768（32K）。",
+    "定价：仅 S5 Nano 在模型页给出（输入 R$ 0,10 / 1M、输出 R$ 0,60 / 1M tokens）；其余见官方 /pt/precos 页面，本 schema 未抓取该页，不编造数值。S5 Free 限时免费。",
+    "限流：本次抓取的页面未给出 RPM/TPM 具体数值；/pt/modelos 只说明 S5 Free 使用固定 rate limits，并指向 /pt/rate-limits 页面。按 SKILL 通用规则，HTTP 429（Too Many Requests / rate limit）一律视为渠道可用。",
+    "文档未提供各模型的输入/输出模态清单，故 models 段不列 modalities；仅 S5 Free 明确「Aceita somente texto」。生图/视频/音频端点在本次抓取的四个页面中均未出现（站点另有 /pt/geracao-de-imagens 页，未纳入本 schema）。",
+    "鉴权：Authorization: Bearer <密钥> + Content-Type: application/json；密钥在 https://plataforma.maritaca.ai/chaves-de-api 创建。文档示例占位符为 minha_chave / SUA_CHAVE_API，SDK 示例用环境变量 MARITACA_API_KEY。",
+    "响应读取：非流式 Responses 用 response.output[0].content[0].text（S5 推理模型可用 response.output_text）；Chat Completions 用 response.choices[0].message.content；流式的文本增量事件是 response.output_text.delta 的 event.delta。",
+    "已停用模型（retired 段）不应写入配置；推荐替换统一为 sabiazinho-4。"
+  ]
+}
